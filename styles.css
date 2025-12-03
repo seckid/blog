@@ -64,7 +64,11 @@ body {
 }
 
 .logo-icon {
-    font-size: 1.5rem;
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    display: block;
+    border-radius: 4px;
 }
 
 .nav-links {
