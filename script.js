@@ -38,6 +38,41 @@ async function fetchMediumPosts() {
                 // Extract category/tags from categories array
                 const tags = item.categories || [];
                 
+                // Extract featured image - try multiple sources
+                let featuredImage = null;
+                
+                // First, try the thumbnail field from RSS2JSON
+                if (item.thumbnail) {
+                    featuredImage = item.thumbnail;
+                } 
+                // If no thumbnail, extract first image from content/description
+                else {
+                    const content = item.content || item.description || '';
+                    const imgMatch = content.match(/<img[^>]+src="([^"]+)"/i);
+                    if (imgMatch && imgMatch[1]) {
+                        featuredImage = imgMatch[1];
+                    }
+                    // Try alternative image formats
+                    else {
+                        const imgMatch2 = content.match(/<img[^>]+src='([^']+)'/i);
+                        if (imgMatch2 && imgMatch2[1]) {
+                            featuredImage = imgMatch2[1];
+                        }
+                    }
+                }
+                
+                // Clean up Medium CDN URLs - ensure we get the full-size image
+                if (featuredImage) {
+                    // Medium images often have size parameters, remove them for better quality
+                    featuredImage = featuredImage.replace(/[?&]w=\d+/g, '').replace(/[?&]h=\d+/g, '');
+                    // Add max width parameter for better quality
+                    if (featuredImage.includes('?')) {
+                        featuredImage += '&w=800';
+                    } else {
+                        featuredImage += '?w=800';
+                    }
+                }
+                
                 return {
                     id: item.guid || item.link.split('/').pop(),
                     title: item.title,
@@ -47,7 +82,7 @@ async function fetchMediumPosts() {
                     excerpt: excerpt,
                     link: item.link,
                     author: item.author,
-                    thumbnail: item.thumbnail || null
+                    thumbnail: featuredImage
                 };
             });
             
@@ -101,18 +136,24 @@ function renderBlogPosts() {
 
     blogGrid.innerHTML = blogPosts.map(post => `
         <a href="${post.link}" target="_blank" rel="noopener noreferrer" class="blog-card">
-            <div class="blog-card-header">
-                <span class="blog-card-date">${formatDate(post.date)}</span>
-                <span class="blog-card-category">${post.category}</span>
-            </div>
-            ${post.thumbnail ? `<img src="${post.thumbnail}" alt="${post.title}" class="blog-card-thumbnail" onerror="this.style.display='none'">` : ''}
-            <h3 class="blog-card-title">${post.title}</h3>
-            <p class="blog-card-excerpt">${post.excerpt}</p>
-            <div class="blog-card-footer">
-                ${post.tags.map(tag => `<span class="blog-card-tag">${tag}</span>`).join('')}
-            </div>
-            <div class="blog-card-link">
-                Read on Medium →
+            ${post.thumbnail ? `
+                <div class="blog-card-image-wrapper">
+                    <img src="${post.thumbnail}" alt="${post.title}" class="blog-card-thumbnail" loading="lazy" onerror="this.style.display='none'; this.parentElement.style.display='none';">
+                </div>
+            ` : ''}
+            <div class="blog-card-content">
+                <div class="blog-card-header">
+                    <span class="blog-card-date">${formatDate(post.date)}</span>
+                    <span class="blog-card-category">${post.category}</span>
+                </div>
+                <h3 class="blog-card-title">${post.title}</h3>
+                <p class="blog-card-excerpt">${post.excerpt}</p>
+                <div class="blog-card-footer">
+                    ${post.tags.map(tag => `<span class="blog-card-tag">${tag}</span>`).join('')}
+                </div>
+                <div class="blog-card-link">
+                    Read on Medium →
+                </div>
             </div>
         </a>
     `).join('');
