@@ -66,9 +66,14 @@ body {
 .logo-icon {
     width: 32px;
     height: 32px;
-    object-fit: contain;
+    min-width: 32px;
+    min-height: 32px;
+    max-width: 32px;
+    max-height: 32px;
+    object-fit: cover;
     display: block;
-    border-radius: 4px;
+    border-radius: 50%;
+    flex-shrink: 0;
 }
 
 .nav-links {
