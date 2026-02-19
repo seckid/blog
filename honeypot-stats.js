@@ -6,7 +6,6 @@
 
 const LOGS_REPO = 'seckid/logs';
 const GITHUB_API_BASE = 'https://api.github.com/repos';
-const RAW_BASE = 'https://cdn.jsdelivr.net/gh'; // CORS-friendly
 
 /** Strip leading ('ip', port) or ("ip", port) from log message for event type display */
 function stripAddrPrefix(s) {
@@ -89,11 +88,30 @@ async function listLogFiles(folder) {
   return logFiles;
 }
 
+/**
+ * Fetch log file content. Uses GitHub API (not jsDelivr) so we get the latest
+ * file content after you push; jsDelivr caches by URL and keeps serving stale logs.
+ */
 async function fetchLogContent(folder, filename) {
-  const url = `${RAW_BASE}/${LOGS_REPO}@main/${folder}/${encodeURIComponent(filename)}${cacheBust()}`;
-  const res = await fetch(url, { cache: "no-store" });
+  const path = `${folder}/${encodeURIComponent(filename)}`;
+  const url = `${GITHUB_API_BASE}/${LOGS_REPO}/contents/${path}${cacheBust()}`;
+  const res = await fetch(url, {
+    headers: { Accept: "application/vnd.github.v3+json" },
+    cache: "no-store"
+  });
   if (!res.ok) return "";
-  return res.text();
+  const data = await res.json();
+  if (data.content && data.encoding === "base64") {
+    try {
+      const binary = atob(data.content.replace(/\s/g, ""));
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    } catch (_) {
+      return "";
+    }
+  }
+  return "";
 }
 
 function aggregate(entries) {
