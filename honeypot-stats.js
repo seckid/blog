@@ -24,12 +24,25 @@ const LOG_PARSERS = {
     const dateMatch = ts.match(/^(\d{4}-\d{2}-\d{2})/);
     const date = dateMatch ? dateMatch[1] : null;
     let eventType = message;
-    if (eventType.includes("LOGIN username=")) eventType = "LOGIN";
-    else if (eventType.startsWith("GET ")) {
+    let loginUsername = null;
+    let loginPassword = null;
+    if (eventType.includes("LOGIN username=")) {
+      eventType = "LOGIN";
+      const loginMatch = message.match(/LOGIN username=(.+?) password=(.*)$/);
+      if (loginMatch) {
+        loginUsername = loginMatch[1].trim();
+        loginPassword = loginMatch[2].trim();
+      }
+    } else if (eventType.startsWith("GET ")) {
       const path = eventType.slice(4).split(/\s/)[0] || "";
       eventType = "GET " + (path || "/");
     } else if (/CVE-\d{4}-\d+/.test(eventType)) eventType = (eventType.match(/CVE-\d{4}-\d+/)?.[0] || eventType);
-    return { date, ip, eventType: eventType || "other" };
+    const out = { date, ip, eventType: eventType || "other", ts };
+    if (loginUsername != null || loginPassword != null) {
+      out.loginUsername = loginUsername;
+      out.loginPassword = loginPassword;
+    }
+    return out;
   },
   ssh(_line) { return null; },
   rdp(_line) { return null; },
@@ -118,13 +131,23 @@ function aggregate(entries) {
   const byDate = {};
   const byIp = {};
   const byEvent = {};
+  const loginAttempts = [];
   for (const e of entries) {
     if (e.date) byDate[e.date] = (byDate[e.date] || 0) + 1;
     if (e.ip) byIp[e.ip] = (byIp[e.ip] || 0) + 1;
     const ev = e.eventType || 'other';
     byEvent[ev] = (byEvent[ev] || 0) + 1;
+    if (e.loginUsername !== undefined || e.loginPassword !== undefined) {
+      loginAttempts.push({
+        ts: e.ts,
+        date: e.date,
+        ip: e.ip,
+        username: e.loginUsername ?? '',
+        password: e.loginPassword ?? ''
+      });
+    }
   }
-  return { byDate, byIp, byEvent, total: entries.length };
+  return { byDate, byIp, byEvent, total: entries.length, loginAttempts };
 }
 
 function getDateRange(days) {
@@ -291,6 +314,26 @@ function renderEvents(byEvent, limit = 12) {
   }
 }
 
+function renderLoginAttempts(loginAttempts, limit = 200) {
+  const tbody = document.querySelector('#table-login-attempts tbody');
+  if (!tbody) return;
+  const sorted = (loginAttempts || []).slice().reverse().slice(0, limit);
+  tbody.innerHTML = sorted
+    .map(
+      (row) =>
+        '<tr><td class="login-ts">' +
+        escapeHtml(row.ts || '') +
+        '</td><td><code>' +
+        escapeHtml(row.ip || '') +
+        '</code></td><td class="login-username">' +
+        escapeHtml(row.username || '') +
+        '</td><td class="login-password">' +
+        escapeHtml(row.password || '') +
+        '</td></tr>'
+    )
+    .join('');
+}
+
 function renderCharts(stats) {
   if (typeof Chart === 'undefined') {
     console.error('Chart.js did not load');
@@ -315,6 +358,11 @@ function renderCharts(stats) {
     renderEvents(stats.byEvent);
   } catch (e) {
     console.error('renderEvents', e);
+  }
+  try {
+    renderLoginAttempts(stats.loginAttempts);
+  } catch (e) {
+    console.error('renderLoginAttempts', e);
   }
 }
 

@@ -697,6 +697,29 @@ body {
     background-color: var(--bg-tertiary);
 }
 
+.stats-table-caption {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin: -1rem 0 1rem 0;
+}
+
+.table-login-attempts {
+    overflow-x: auto;
+}
+
+.stats-table .login-ts {
+    white-space: nowrap;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+    color: var(--text-secondary);
+}
+
+.stats-table .login-username,
+.stats-table .login-password {
+    word-break: break-word;
+    max-width: 200px;
+}
+
 @media (max-width: 900px) {
     .stats-two-col {
         grid-template-columns: 1fr;
