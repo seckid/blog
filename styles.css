@@ -676,6 +676,19 @@ body {
     color: var(--accent-success);
 }
 
+.stats-table .event-cell {
+    max-width: 420px;
+    word-break: break-word;
+    white-space: normal;
+    line-height: 1.4;
+    vertical-align: top;
+}
+
+.stats-table .event-cell .event-text {
+    white-space: normal;
+    word-break: break-word;
+}
+
 .stats-table tbody tr:last-child td {
     border-bottom: none;
 }

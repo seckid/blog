@@ -8,23 +8,29 @@ const LOGS_REPO = 'seckid/logs';
 const GITHUB_API_BASE = 'https://api.github.com/repos';
 const RAW_BASE = 'https://cdn.jsdelivr.net/gh'; // CORS-friendly
 
+/** Strip leading ('ip', port) or ("ip", port) from log message for event type display */
+function stripAddrPrefix(s) {
+  if (!s || typeof s !== "string") return s;
+  return s.replace(/^\s*\(\s*['"]?[\d.]+['"]?\s*,\s*\d+\)\s*/, "").trim();
+}
+
 const LOG_PARSERS = {
   fortipot(line) {
-    const parts = line.split('|');
+    const parts = line.split("|");
     if (parts.length < 4) return null;
     const ts = parts[0].trim();
     const ip = parts[2].trim();
-    const message = parts.slice(3).join('|').trim();
+    const rawMessage = parts.slice(3).join("|").trim();
+    const message = stripAddrPrefix(rawMessage);
     const dateMatch = ts.match(/^(\d{4}-\d{2}-\d{2})/);
     const date = dateMatch ? dateMatch[1] : null;
     let eventType = message;
-    if (eventType.includes('LOGIN username=')) eventType = 'LOGIN';
-    else if (eventType.startsWith('GET ')) {
-      const path = eventType.slice(4).split(/\s/)[0] || '';
-      eventType = 'GET ' + (path.length > 25 ? path.slice(0, 24) + '…' : path || '/');
-    } else if (/CVE-\d{4}-\d+/.test(eventType)) eventType = (eventType.match(/CVE-\d{4}-\d+/)?.[0] || eventType.slice(0, 30));
-    else if (eventType.length > 32) eventType = eventType.slice(0, 32) + '…';
-    return { date, ip, eventType: eventType || 'other' };
+    if (eventType.includes("LOGIN username=")) eventType = "LOGIN";
+    else if (eventType.startsWith("GET ")) {
+      const path = eventType.slice(4).split(/\s/)[0] || "";
+      eventType = "GET " + (path || "/");
+    } else if (/CVE-\d{4}-\d+/.test(eventType)) eventType = (eventType.match(/CVE-\d{4}-\d+/)?.[0] || eventType);
+    return { date, ip, eventType: eventType || "other" };
   },
   ssh(_line) { return null; },
   rdp(_line) { return null; },
@@ -38,6 +44,15 @@ let chartEvents = null;
 function show(el, visible) {
   if (!el) return;
   el.classList.toggle('hidden', !visible);
+}
+
+function escapeHtml(s) {
+  if (!s) return "";
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function parseLogLines(text, honeypotType) {
@@ -200,7 +215,9 @@ function renderTopIps(byIp, limit = 15) {
 
 function renderEvents(byEvent, limit = 12) {
   const sorted = Object.entries(byEvent).sort((a, b) => b[1] - a[1]).slice(0, limit);
-  const labels = sorted.map(([ev]) => ev.length > 28 ? ev.slice(0, 26) + '…' : ev);
+  const fullLabels = sorted.map(([ev]) => ev);
+  const shortLabel = (s, maxLen) => (s.length <= maxLen ? s : s.slice(0, maxLen - 1) + "\u2026");
+  const chartLabels = fullLabels.map((s) => shortLabel(s, 40));
   const data = sorted.map(([, n]) => n);
   const colors = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#84cc16', '#6366f1', '#14b8a6', '#f97316', '#a855f7'];
   const ctx = document.getElementById('chart-events');
@@ -208,21 +225,43 @@ function renderEvents(byEvent, limit = 12) {
   if (ctx) {
     if (chartEvents) chartEvents.destroy();
     chartEvents = new Chart(ctx, {
-      type: 'pie',
+      type: "pie",
       data: {
-        labels,
-        datasets: [{ data, backgroundColor: colors.slice(0, data.length), borderColor: 'var(--bg-secondary)', borderWidth: 1 }]
+        labels: chartLabels,
+        datasets: [{ data, backgroundColor: colors.slice(0, data.length), borderColor: "var(--bg-secondary)", borderWidth: 1 }]
       },
       options: {
         responsive: true,
         plugins: {
-          legend: { position: 'right', labels: { color: '#9ca3af', padding: 8 } }
+          legend: { position: "right", labels: { color: "#9ca3af", padding: 8 } },
+          tooltip: {
+            callbacks: {
+              label: function (context) {
+                const full = fullLabels[context.dataIndex];
+                const count = context.parsed;
+                const total = context.dataset.data.reduce(function (a, b) { return a + b; }, 0);
+                const pctStr = total ? ((100 * count) / total).toFixed(1) : "0";
+                return full + " \u2014 " + count.toLocaleString() + " (" + pctStr + "%)";
+              }
+            }
+          }
         }
       }
     });
   }
   if (tbody) {
-    tbody.innerHTML = sorted.map(([ev, n]) => `<tr><td><code>${ev}</code></td><td>${n.toLocaleString()}</td></tr>`).join('');
+    tbody.innerHTML = sorted
+      .map(
+        ([ev, n]) =>
+          '<tr><td class="event-cell" title="' +
+          escapeHtml(ev) +
+          '"><code class="event-text">' +
+          escapeHtml(ev) +
+          "</code></td><td>" +
+          n.toLocaleString() +
+          "</td></tr>"
+      )
+      .join("");
   }
 }
 
