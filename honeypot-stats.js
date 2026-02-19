@@ -177,18 +177,18 @@ function renderTopIps(byIp, limit = 15) {
   if (ctx) {
     if (chartTopIps) chartTopIps.destroy();
     chartTopIps = new Chart(ctx, {
-      type: 'bar',
+      type: "bar",
       data: {
-        labels,
-        datasets: [{ label: 'Requests', data, backgroundColor: 'rgba(139, 92, 246, 0.7)', borderColor: 'rgb(139, 92, 246)', borderWidth: 1 }]
+        labels: labels,
+        datasets: [{ label: "Requests", data: data, backgroundColor: "rgba(139, 92, 246, 0.7)", borderColor: "rgb(139, 92, 246)", borderWidth: 1 }]
       },
       options: {
-        indexAxis: 'y',
+        indexAxis: "y",
         responsive: true,
         plugins: { legend: { display: false } },
         scales: {
-          x: { beginAtZero: true, grid: { color: 'rgba(45, 55, 72, 0.5)' }, ticks: { color: '#9ca3af' } },
-          y: { grid: { display: false }, ticks: { color: '#9ca3af', font: { family: 'JetBrains Mono' } }
+          x: { beginAtZero: true, grid: { color: "rgba(45, 55, 72, 0.5)" }, ticks: { color: "#9ca3af" } },
+          y: { grid: { display: false }, ticks: { color: "#9ca3af", font: { family: "JetBrains Mono" } } }
         }
       }
     });
