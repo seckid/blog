@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Honeypot statistics - Traffic, top IPs, and events from SecurityKid honeypots">
+    <title>Honeypot Statistics - SecurityKid</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <header class="header">
+        <nav class="nav">
+            <div class="nav-container">
+                <a href="index.html" class="logo">
+                    <img src="logo.png" alt="SecurityKid Logo" class="logo-icon">
+                    <span class="logo-text">SecurityKid</span>
+                </a>
+                <ul class="nav-links">
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="honeypot-stats.html" class="nav-active">Honeypot Statistics</a></li>
+                    <li><a href="index.html#about">About</a></li>
+                    <li><a href="index.html#contact">Contact</a></li>
+                </ul>
+            </div>
+        </nav>
+    </header>
+
+    <main class="main">
+        <section class="hero hero-stats">
+            <div class="hero-content">
+                <h1 class="hero-title">Honeypot Statistics</h1>
+                <p class="hero-subtitle">Traffic, top sources, and events from honeypot logs (FortiPot, SSH, RDP, FTP)</p>
+            </div>
+        </section>
+
+        <section class="stats-section">
+            <div class="container">
+                <div class="stats-controls">
+                    <label for="honeypot-type">Honeypot type</label>
+                    <select id="honeypot-type">
+                        <option value="fortipot" selected>FortiPot (HTTPS/SSL-VPN)</option>
+                        <option value="ssh">SSH (coming soon)</option>
+                        <option value="rdp">RDP (coming soon)</option>
+                        <option value="ftp">FTP (coming soon)</option>
+                    </select>
+                    <label for="date-range">Show last</label>
+                    <select id="date-range">
+                        <option value="7">7 days</option>
+                        <option value="14">14 days</option>
+                        <option value="30" selected>30 days</option>
+                        <option value="90">90 days</option>
+                        <option value="all">All time</option>
+                    </select>
+                    <button type="button" id="load-stats" class="btn-primary">Load statistics</button>
+                </div>
+
+                <div id="stats-loading" class="stats-loading hidden">
+                    <p>Fetching log files from <a href="https://github.com/seckid/logs" target="_blank" rel="noopener noreferrer">github.com/seckid/logs</a>...</p>
+                </div>
+                <div id="stats-error" class="stats-error hidden"></div>
+                <div id="stats-content" class="stats-content hidden">
+                    <div class="stats-summary" id="stats-summary"></div>
+                    <h2 class="section-title">Traffic over time</h2>
+                    <div class="chart-container">
+                        <canvas id="chart-traffic"></canvas>
+                    </div>
+                    <h2 class="section-title">Top IP addresses</h2>
+                    <div class="stats-two-col">
+                        <div class="chart-container chart-half">
+                            <canvas id="chart-top-ips"></canvas>
+                        </div>
+                        <div class="table-wrapper">
+                            <table class="stats-table" id="table-top-ips">
+                                <thead><tr><th>IP address</th><th>Requests</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <h2 class="section-title">Event types</h2>
+                    <div class="stats-two-col">
+                        <div class="chart-container chart-half">
+                            <canvas id="chart-events"></canvas>
+                        </div>
+                        <div class="table-wrapper">
+                            <table class="stats-table" id="table-events">
+                                <thead><tr><th>Event type</th><th>Count</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2024 SecurityKid. All rights reserved.</p>
+            <p class="footer-note">Logs from <a href="https://github.com/seckid/logs" target="_blank" rel="noopener noreferrer">seckid/logs</a></p>
+        </div>
+    </footer>
+
+    <script src="honeypot-stats.js"></script>
+</body>
+</html>
