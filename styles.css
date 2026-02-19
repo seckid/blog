@@ -623,11 +623,17 @@ body {
     padding: 1.5rem;
     margin-bottom: 2rem;
     min-height: 280px;
+    height: 320px;
     position: relative;
+}
+
+.chart-container canvas {
+    max-height: 280px;
 }
 
 .chart-half {
     min-height: 320px;
+    height: 360px;
 }
 
 .stats-two-col {

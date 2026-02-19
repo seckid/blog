@@ -226,6 +226,33 @@ function renderEvents(byEvent, limit = 12) {
   }
 }
 
+function renderCharts(stats) {
+  if (typeof Chart === 'undefined') {
+    console.error('Chart.js did not load');
+    return;
+  }
+  try {
+    renderSummary(stats, 'fortipot');
+  } catch (e) {
+    console.error('renderSummary', e);
+  }
+  try {
+    renderTrafficChart(stats.byDate);
+  } catch (e) {
+    console.error('renderTrafficChart', e);
+  }
+  try {
+    renderTopIps(stats.byIp);
+  } catch (e) {
+    console.error('renderTopIps', e);
+  }
+  try {
+    renderEvents(stats.byEvent);
+  } catch (e) {
+    console.error('renderEvents', e);
+  }
+}
+
 async function runStats() {
   const honeypotType = document.getElementById('honeypot-type').value;
   const dateRangeVal = document.getElementById('date-range').value;
@@ -236,6 +263,7 @@ async function runStats() {
 
   if (honeypotType !== 'fortipot') {
     show(contentEl, false);
+    show(loadingEl, false);
     show(errorEl, true);
     errorEl.innerHTML = '<p>Only FortiPot logs are available at the moment. SSH, RDP, and FTP will be added when logs are available in the repo.</p>';
     return;
@@ -247,6 +275,10 @@ async function runStats() {
   if (loadBtn) loadBtn.disabled = true;
 
   try {
+    if (typeof Chart === 'undefined') {
+      throw new Error('Chart.js failed to load. Check your connection or try disabling ad blockers.');
+    }
+
     const dateRange = getDateRange(dateRangeVal);
     const stats = await loadAndParseLogs('fortipot', dateRange);
 
@@ -260,10 +292,10 @@ async function runStats() {
     }
 
     show(contentEl, true);
-    renderSummary(stats, 'fortipot');
-    renderTrafficChart(stats.byDate);
-    renderTopIps(stats.byIp);
-    renderEvents(stats.byEvent);
+    // Defer chart creation so layout is complete and canvas has dimensions
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => renderCharts(stats));
+    });
   } catch (err) {
     show(loadingEl, false);
     if (loadBtn) loadBtn.disabled = false;
