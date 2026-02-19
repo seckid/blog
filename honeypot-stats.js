@@ -68,23 +68,31 @@ function parseLogLines(text, honeypotType) {
   return entries;
 }
 
+/** Cache-bust query string so updated repo content is fetched after you push changes */
+function cacheBust() {
+  return "?nocache=" + Date.now();
+}
+
 async function listLogFiles(folder) {
-  const url = `${GITHUB_API_BASE}/${LOGS_REPO}/contents/${folder}`;
-  const res = await fetch(url, { headers: { Accept: 'application/vnd.github.v3+json' } });
+  const url = `${GITHUB_API_BASE}/${LOGS_REPO}/contents/${folder}${cacheBust()}`;
+  const res = await fetch(url, {
+    headers: { Accept: "application/vnd.github.v3+json" },
+    cache: "no-store"
+  });
   if (!res.ok) throw new Error(`Failed to list ${folder}: ${res.status}`);
   const data = await res.json();
-  if (!Array.isArray(data)) throw new Error('Invalid API response');
+  if (!Array.isArray(data)) throw new Error("Invalid API response");
   const logFiles = data
-    .filter(f => f.type === 'file' && /^\d{4}-\d{2}-\d{2}_.*\.log$/.test(f.name))
+    .filter(f => f.type === "file" && /^\d{4}-\d{2}-\d{2}_.*\.log$/.test(f.name))
     .map(f => f.name)
     .sort();
   return logFiles;
 }
 
 async function fetchLogContent(folder, filename) {
-  const url = `${RAW_BASE}/${LOGS_REPO}@main/${folder}/${encodeURIComponent(filename)}`;
-  const res = await fetch(url);
-  if (!res.ok) return '';
+  const url = `${RAW_BASE}/${LOGS_REPO}@main/${folder}/${encodeURIComponent(filename)}${cacheBust()}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) return "";
   return res.text();
 }
 
