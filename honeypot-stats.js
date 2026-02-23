@@ -102,29 +102,22 @@ async function listLogFiles(folder) {
 }
 
 /**
- * Fetch log file content. Uses GitHub API (not jsDelivr) so we get the latest
- * file content after you push; jsDelivr caches by URL and keeps serving stale logs.
+ * Fetch log file content. Uses GitHub API with raw media type so large files
+ * (e.g. 12k+ events, 1–100 MB) are returned in full; default JSON+base64 is limited to 1 MB.
  */
 async function fetchLogContent(folder, filename) {
   const path = `${folder}/${encodeURIComponent(filename)}`;
   const url = `${GITHUB_API_BASE}/${LOGS_REPO}/contents/${path}${cacheBust()}`;
   const res = await fetch(url, {
-    headers: { Accept: "application/vnd.github.v3+json" },
+    headers: { Accept: "application/vnd.github.v3.raw" },
     cache: "no-store"
   });
   if (!res.ok) return "";
-  const data = await res.json();
-  if (data.content && data.encoding === "base64") {
-    try {
-      const binary = atob(data.content.replace(/\s/g, ""));
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-    } catch (_) {
-      return "";
-    }
+  try {
+    return await res.text();
+  } catch (_) {
+    return "";
   }
-  return "";
 }
 
 function aggregate(entries) {
