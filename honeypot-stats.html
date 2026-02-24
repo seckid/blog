@@ -34,7 +34,7 @@
         <section class="hero hero-stats">
             <div class="hero-content">
                 <h1 class="hero-title">Honeypot Statistics</h1>
-                <p class="hero-subtitle">Traffic, top sources, and events from honeypot logs (FortiPot, SSH, RDP, FTP)</p>
+                <p class="hero-subtitle">Traffic, top sources, and events from honeypot logs (FortiPot, CentreStack, SSH, RDP, FTP)</p>
             </div>
         </section>
 
@@ -44,6 +44,7 @@
                     <label for="honeypot-type">Honeypot type</label>
                     <select id="honeypot-type">
                         <option value="fortipot" selected>FortiPot (HTTPS/SSL-VPN)</option>
+                        <option value="centrestackpot">CentreStack (CVE-2025-14611 / filesvr.dn)</option>
                         <option value="ssh">SSH (coming soon)</option>
                         <option value="rdp">RDP (coming soon)</option>
                         <option value="ftp">FTP (coming soon)</option>
@@ -93,13 +94,15 @@
                             </table>
                         </div>
                     </div>
-                    <h2 class="section-title">Login attempts (username / password)</h2>
-                    <p class="stats-table-caption">Credentials attempted against the FortiPot honeypot (last 200, most recent first).</p>
-                    <div class="table-wrapper table-login-attempts">
-                        <table class="stats-table" id="table-login-attempts">
-                            <thead><tr><th>Time</th><th>IP address</th><th>Username</th><th>Password</th></tr></thead>
-                            <tbody></tbody>
-                        </table>
+                    <div id="login-attempts-section">
+                        <h2 class="section-title">Login attempts (username / password)</h2>
+                        <p class="stats-table-caption">Credentials attempted against the FortiPot honeypot (last 200, most recent first).</p>
+                        <div class="table-wrapper table-login-attempts">
+                            <table class="stats-table" id="table-login-attempts">
+                                <thead><tr><th>Time</th><th>IP address</th><th>Username</th><th>Password</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>

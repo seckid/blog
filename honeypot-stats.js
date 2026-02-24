@@ -1,7 +1,7 @@
 /**
  * Honeypot Statistics - fetches logs from github.com/seckid/logs and renders charts/tables.
- * Log files: folder/yyyy-mm-dd_logname.log (e.g. fortipot/2026-02-18_fortipot.log).
- * FortiPot log line format: timestamp|level|ip_address|message
+ * Log files: folder/yyyy-mm-dd_logname.log (e.g. fortipot/, centrestackpot/).
+ * Log line format (FortiPot & CentreStack): timestamp|level|ip_address|message
  */
 
 const LOGS_REPO = 'seckid/logs';
@@ -43,6 +43,25 @@ const LOG_PARSERS = {
       out.loginPassword = loginPassword;
     }
     return out;
+  },
+  centrestackpot(line) {
+    const parts = line.split("|");
+    if (parts.length < 4) return null;
+    const ts = parts[0].trim();
+    const ip = parts[2].trim();
+    const message = parts.slice(3).join("|").trim();
+    const dateMatch = ts.match(/^(\d{4}-\d{2}-\d{2})/);
+    const date = dateMatch ? dateMatch[1] : null;
+    let eventType = message;
+    if (eventType.includes("EXPLOIT filesvr.dn")) eventType = "EXPLOIT filesvr.dn (CVE-2025-14611)";
+    else if (eventType.includes("filesvr.dn request")) eventType = "filesvr.dn request";
+    else if (eventType.startsWith("Request ")) eventType = eventType.split(/\s+/).slice(0, 3).join(" ");
+    else if (eventType.startsWith("Redirect ")) eventType = "Redirect";
+    else if (eventType.startsWith("Portal request")) eventType = "Portal request";
+    else if (eventType.startsWith("Static 200")) eventType = "Static 200";
+    else if (eventType.startsWith("404 Not found")) eventType = "404 Not found";
+    else if (eventType.startsWith("Favicon")) eventType = "Favicon";
+    return { date, ip, eventType: eventType || "other", ts };
   },
   ssh(_line) { return null; },
   rdp(_line) { return null; },
@@ -161,13 +180,20 @@ function filterFilesByDate(files, dateRange) {
   });
 }
 
+/** Folder name in repo -> parser key (fortipot, centrestackpot, etc.) */
+function folderToParserKey(folder) {
+  if (folder === 'fortipot' || folder === 'centrestackpot') return folder;
+  return 'fortipot';
+}
+
 async function loadAndParseLogs(folder, dateRange) {
   const files = await listLogFiles(folder);
   const filtered = filterFilesByDate(files, dateRange);
+  const parserKey = folderToParserKey(folder);
   const allEntries = [];
   for (const filename of filtered) {
     const text = await fetchLogContent(folder, filename);
-    const entries = parseLogLines(text, folder === 'fortipot' ? 'fortipot' : folder);
+    const entries = parseLogLines(text, parserKey);
     allEntries.push(...entries);
   }
   return aggregate(allEntries);
@@ -327,13 +353,13 @@ function renderLoginAttempts(loginAttempts, limit = 200) {
     .join('');
 }
 
-function renderCharts(stats) {
+function renderCharts(stats, honeypotType) {
   if (typeof Chart === 'undefined') {
     console.error('Chart.js did not load');
     return;
   }
   try {
-    renderSummary(stats, 'fortipot');
+    renderSummary(stats, honeypotType);
   } catch (e) {
     console.error('renderSummary', e);
   }
@@ -352,26 +378,39 @@ function renderCharts(stats) {
   } catch (e) {
     console.error('renderEvents', e);
   }
-  try {
-    renderLoginAttempts(stats.loginAttempts);
-  } catch (e) {
-    console.error('renderLoginAttempts', e);
+  const loginSection = document.getElementById('login-attempts-section');
+  if (loginSection) loginSection.classList.toggle('hidden', honeypotType !== 'fortipot');
+  if (honeypotType === 'fortipot') {
+    try {
+      renderLoginAttempts(stats.loginAttempts);
+    } catch (e) {
+      console.error('renderLoginAttempts', e);
+    }
   }
 }
 
+const HONEYPOT_FOLDERS = {
+  fortipot: 'fortipot',
+  centrestackpot: 'centrestackpot',
+  ssh: null,
+  rdp: null,
+  ftp: null
+};
+
 async function runStats() {
   const honeypotType = document.getElementById('honeypot-type').value;
+  const folder = HONEYPOT_FOLDERS[honeypotType];
   const dateRangeVal = document.getElementById('date-range').value;
   const loadBtn = document.getElementById('load-stats');
   const loadingEl = document.getElementById('stats-loading');
   const errorEl = document.getElementById('stats-error');
   const contentEl = document.getElementById('stats-content');
 
-  if (honeypotType !== 'fortipot') {
+  if (!folder) {
     show(contentEl, false);
     show(loadingEl, false);
     show(errorEl, true);
-    errorEl.innerHTML = '<p>Only FortiPot logs are available at the moment. SSH, RDP, and FTP will be added when logs are available in the repo.</p>';
+    errorEl.innerHTML = '<p>Only FortiPot and CentreStack logs are available at the moment. SSH, RDP, and FTP will be added when logs are available in the repo.</p>';
     return;
   }
 
@@ -386,7 +425,7 @@ async function runStats() {
     }
 
     const dateRange = getDateRange(dateRangeVal);
-    const stats = await loadAndParseLogs('fortipot', dateRange);
+    const stats = await loadAndParseLogs(folder, dateRange);
 
     show(loadingEl, false);
     if (loadBtn) loadBtn.disabled = false;
@@ -398,9 +437,8 @@ async function runStats() {
     }
 
     show(contentEl, true);
-    // Defer chart creation so layout is complete and canvas has dimensions
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => renderCharts(stats));
+      requestAnimationFrame(() => renderCharts(stats, honeypotType));
     });
   } catch (err) {
     show(loadingEl, false);
