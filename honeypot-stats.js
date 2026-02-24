@@ -53,15 +53,31 @@ const LOG_PARSERS = {
     const dateMatch = ts.match(/^(\d{4}-\d{2}-\d{2})/);
     const date = dateMatch ? dateMatch[1] : null;
     let eventType = message;
-    if (eventType.includes("EXPLOIT filesvr.dn")) eventType = "EXPLOIT filesvr.dn (CVE-2025-14611)";
-    else if (eventType.includes("filesvr.dn request")) eventType = "filesvr.dn request";
+    let loginUsername = null;
+    let loginPassword = null;
+    if (eventType.includes("LOGIN username=")) {
+      eventType = "LOGIN";
+      const loginMatch = message.match(/LOGIN username=(.+?) password=(.*)$/);
+      if (loginMatch) {
+        loginUsername = loginMatch[1].trim();
+        loginPassword = loginMatch[2].trim();
+      }
+    } else if (eventType.includes("CVE-2025-11371 LFI attempt")) eventType = "CVE-2025-11371 LFI attempt";
+    else if (eventType.includes("CVE-2025-11371 t.dn")) eventType = "CVE-2025-11371 t.dn request";
+    else if (eventType.includes("EXPLOIT filesvr.dn") || eventType.includes("CVE-2025-14611 EXPLOIT")) eventType = "CVE-2025-14611 EXPLOIT filesvr.dn";
+    else if (eventType.includes("CVE-2025-14611 filesvr.dn") || eventType.includes("filesvr.dn request")) eventType = "filesvr.dn request";
     else if (eventType.startsWith("Request ")) eventType = eventType.split(/\s+/).slice(0, 3).join(" ");
     else if (eventType.startsWith("Redirect ")) eventType = "Redirect";
     else if (eventType.startsWith("Portal request")) eventType = "Portal request";
     else if (eventType.startsWith("Static 200")) eventType = "Static 200";
     else if (eventType.startsWith("404 Not found")) eventType = "404 Not found";
     else if (eventType.startsWith("Favicon")) eventType = "Favicon";
-    return { date, ip, eventType: eventType || "other", ts };
+    const out = { date, ip, eventType: eventType || "other", ts };
+    if (loginUsername != null || loginPassword != null) {
+      out.loginUsername = loginUsername;
+      out.loginPassword = loginPassword;
+    }
+    return out;
   },
   ssh(_line) { return null; },
   rdp(_line) { return null; },
@@ -379,8 +395,9 @@ function renderCharts(stats, honeypotType) {
     console.error('renderEvents', e);
   }
   const loginSection = document.getElementById('login-attempts-section');
-  if (loginSection) loginSection.classList.toggle('hidden', honeypotType !== 'fortipot');
-  if (honeypotType === 'fortipot') {
+  const showLogin = honeypotType === 'fortipot' || honeypotType === 'centrestackpot';
+  if (loginSection) loginSection.classList.toggle('hidden', !showLogin);
+  if (showLogin) {
     try {
       renderLoginAttempts(stats.loginAttempts);
     } catch (e) {
