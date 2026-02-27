@@ -36,6 +36,14 @@ function makeChart(id, config) {
   return _charts[id];
 }
 
+function countryFlag(code) {
+  if (!code || code.length !== 2) return '';
+  // Regional Indicator Symbol Letters: U+1F1E6 = 'A', offset from 'A' (65) = 127397
+  return Array.from(code.toUpperCase())
+    .map(c => String.fromCodePoint(c.charCodeAt(0) + 127397))
+    .join('');
+}
+
 function escHtml(s) {
   if (!s) return '';
   return String(s)
@@ -266,7 +274,7 @@ function renderAsnsTable(asns) {
     <tr>
       <td><code>${escHtml(a.asn)}</code></td>
       <td>${escHtml(a.name)}</td>
-      <td>${escHtml(a.country)}</td>
+      <td>${countryFlag(a.country)} ${escHtml(a.country)}</td>
       <td>${fmtNum(a.event_count)}</td>
       <td>${fmtNum(a.ip_count)}</td>
     </tr>`));
