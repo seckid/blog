@@ -126,18 +126,22 @@ function renderTrafficChart(eventsPerDay, honeypots) {
   const datasets = sources.map(src => ({
     label: src,
     data: days.map(d => (filtered[d] || {})[src] || 0),
-    backgroundColor: sourceColour(src),
     borderColor: sourceColour(src),
-    borderWidth: 1,
-    stack: 'events',
+    backgroundColor: sourceColour(src) + '22',
+    borderWidth: 2,
+    pointRadius: days.length > 60 ? 0 : 3,
+    pointHoverRadius: 5,
+    tension: 0.3,
+    fill: false,
   }));
 
   makeChart('chart-traffic', {
-    type: 'bar',
+    type: 'line',
     data: { labels: days, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: true,
+      interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { position: 'top', labels: { color: '#9ca3af', padding: 10 } },
         tooltip: {
@@ -150,8 +154,8 @@ function renderTrafficChart(eventsPerDay, honeypots) {
         },
       },
       scales: {
-        x: { stacked: true, grid: { color: 'rgba(45,55,72,.4)' }, ticks: { color: '#9ca3af', maxRotation: 45 } },
-        y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(45,55,72,.4)' }, ticks: { color: '#9ca3af' } },
+        x: { grid: { color: 'rgba(45,55,72,.4)' }, ticks: { color: '#9ca3af', maxRotation: 45 } },
+        y: { beginAtZero: true, grid: { color: 'rgba(45,55,72,.4)' }, ticks: { color: '#9ca3af' } },
       },
     },
   });
