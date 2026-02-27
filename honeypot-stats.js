@@ -38,10 +38,12 @@ function makeChart(id, config) {
 
 function countryFlag(code) {
   if (!code || code.length !== 2) return '';
-  // Regional Indicator Symbol Letters: U+1F1E6 = 'A', offset from 'A' (65) = 127397
-  return Array.from(code.toUpperCase())
-    .map(c => String.fromCodePoint(c.charCodeAt(0) + 127397))
-    .join('');
+  const lower = code.toLowerCase();
+  return `<img src="https://flagcdn.com/16x12/${lower}.png"
+               srcset="https://flagcdn.com/32x24/${lower}.png 2x"
+               width="16" height="12"
+               alt="${escHtml(code.toUpperCase())}"
+               style="vertical-align:middle;margin-right:4px;border-radius:2px">`;
 }
 
 function escHtml(s) {
