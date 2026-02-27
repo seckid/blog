@@ -67,14 +67,17 @@ function show(id, visible) {
 // -------------------------------------------------------------------------
 
 async function fetchStats() {
-  // cache: 'reload' sends Cache-Control: no-cache to the CDN (Fastly on
-  // raw.githubusercontent.com), forcing a revalidation from GitHub's origin
-  // rather than serving a stale cached copy.
-  const res = await fetch(STATS_RAW_URL, {
-    cache: 'reload',
-    headers: { 'Pragma': 'no-cache' },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status} fetching stats.json`);
+  // Append a timestamp query param so each request is a unique URL — this busts
+  // Fastly's CDN cache on raw.githubusercontent.com without adding custom headers
+  // (custom headers like Cache-Control trigger a CORS preflight that GitHub rejects).
+  const url = `${STATS_RAW_URL}?t=${Date.now()}`;
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error('stats.json not found — the first hourly upload may not have run yet.');
+    }
+    throw new Error(`HTTP ${res.status} fetching stats.json`);
+  }
   return res.json();
 }
 
@@ -259,17 +262,46 @@ function renderTable(tableId, rows) {
   tbody.innerHTML = rows.join('');
 }
 
+function severityColour(severity) {
+  switch ((severity || '').toLowerCase()) {
+    case 'critical': return '#ef4444';
+    case 'high':     return '#f97316';
+    case 'medium':   return '#f59e0b';
+    case 'low':      return '#10b981';
+    default:         return '#6b7280';
+  }
+}
+
 function renderCves(cves) {
   if (!cves || !cves.length) {
-    renderTable('table-cves', ['<tr><td colspan="3" style="color:#6b7280">No CVE attempts recorded.</td></tr>']);
+    renderTable('table-cves', ['<tr><td colspan="6" style="color:#6b7280">No CVE attempts recorded.</td></tr>']);
     return;
   }
-  renderTable('table-cves', cves.map(c => `
+  renderTable('table-cves', cves.map(c => {
+    const severityBadge = c.severity
+      ? `<span style="color:${severityColour(c.severity)};font-weight:600;font-size:.72rem">${escHtml(c.severity)}</span>${c.cvss_score ? ` <span style="color:#9ca3af;font-size:.72rem">(${c.cvss_score})</span>` : ''}`
+      : '—';
+    const paths = (c.sample_paths || []).map(p =>
+      `<code style="display:block;font-size:.72rem;word-break:break-all;color:#93c5fd">${escHtml(p)}</code>`
+    ).join('') || '<span style="color:#6b7280">—</span>';
+    const ips = (c.sample_ips || []).map(ip =>
+      `<code style="display:block;font-size:.72rem">${escHtml(ip)}</code>`
+    ).join('') || '<span style="color:#6b7280">—</span>';
+    return `
     <tr>
-      <td><span class="badge badge-cve">${escHtml(c.cve)}</span></td>
+      <td style="white-space:nowrap">
+        <span class="badge badge-cve">${escHtml(c.cve)}</span>
+      </td>
+      <td style="font-size:.78rem;color:#d1d5db;max-width:260px">
+        ${c.description ? escHtml(c.description) : '<span style="color:#6b7280">—</span>'}
+      </td>
+      <td>${severityBadge}</td>
       <td>${fmtNum(c.count)}</td>
       <td>${(c.sources || []).map(s => `<span class="badge badge-source">${escHtml(s)}</span>`).join(' ')}</td>
-    </tr>`));
+      <td>${paths}</td>
+      <td>${ips}</td>
+    </tr>`;
+  }));
 }
 
 function renderAsnsTable(asns) {
