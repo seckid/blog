@@ -1,471 +1,395 @@
 /**
- * Honeypot Statistics - fetches logs from github.com/seckid/logs and renders charts/tables.
- * Log files: folder/yyyy-mm-dd_logname.log (e.g. fortipot/, centrestackpot/).
- * Log line format (FortiPot & CentreStack): timestamp|level|ip_address|message
+ * Honeypot Statistics — reads stats/stats.json from github.com/seckid/logs
+ * and renders charts/tables. No raw log parsing; all aggregation done server-side
+ * by generate_and_upload_stats.py on threatapp-01 (updated hourly).
  */
 
-const LOGS_REPO = 'seckid/logs';
-const GITHUB_API_BASE = 'https://api.github.com/repos';
+const STATS_RAW_URL =
+  'https://raw.githubusercontent.com/seckid/logs/main/stats/stats.json';
 
-/** Strip leading ('ip', port) or ("ip", port) from log message for event type display */
-function stripAddrPrefix(s) {
-  if (!s || typeof s !== "string") return s;
-  return s.replace(/^\s*\(\s*['"]?[\d.]+['"]?\s*,\s*\d+\)\s*/, "").trim();
-}
+// Chart.js colour palette
+const COLOURS = [
+  '#3b82f6', '#8b5cf6', '#10b981', '#f59e0b',
+  '#ef4444', '#06b6d4', '#ec4899', '#84cc16',
+  '#6366f1', '#14b8a6', '#f97316', '#a855f7',
+];
 
-const LOG_PARSERS = {
-  fortipot(line) {
-    const parts = line.split("|");
-    if (parts.length < 4) return null;
-    const ts = parts[0].trim();
-    const ip = parts[2].trim();
-    const rawMessage = parts.slice(3).join("|").trim();
-    const message = stripAddrPrefix(rawMessage);
-    const dateMatch = ts.match(/^(\d{4}-\d{2}-\d{2})/);
-    const date = dateMatch ? dateMatch[1] : null;
-    let eventType = message;
-    let loginUsername = null;
-    let loginPassword = null;
-    if (eventType.includes("LOGIN username=")) {
-      eventType = "LOGIN";
-      const loginMatch = message.match(/LOGIN username=(.+?) password=(.*)$/);
-      if (loginMatch) {
-        loginUsername = loginMatch[1].trim();
-        loginPassword = loginMatch[2].trim();
-      }
-    } else if (eventType.startsWith("GET ")) {
-      const path = eventType.slice(4).split(/\s/)[0] || "";
-      eventType = "GET " + (path || "/");
-    } else if (/CVE-\d{4}-\d+/.test(eventType)) eventType = (eventType.match(/CVE-\d{4}-\d+/)?.[0] || eventType);
-    const out = { date, ip, eventType: eventType || "other", ts };
-    if (loginUsername != null || loginPassword != null) {
-      out.loginUsername = loginUsername;
-      out.loginPassword = loginPassword;
-    }
-    return out;
-  },
-  centrestackpot(line) {
-    const parts = line.split("|");
-    if (parts.length < 4) return null;
-    const ts = parts[0].trim();
-    const ip = parts[2].trim();
-    const message = parts.slice(3).join("|").trim();
-    const dateMatch = ts.match(/^(\d{4}-\d{2}-\d{2})/);
-    const date = dateMatch ? dateMatch[1] : null;
-    let eventType = message;
-    let loginUsername = null;
-    let loginPassword = null;
-    if (eventType.includes("LOGIN username=")) {
-      eventType = "LOGIN";
-      const loginMatch = message.match(/LOGIN username=(.+?) password=(.*)$/);
-      if (loginMatch) {
-        loginUsername = loginMatch[1].trim();
-        loginPassword = loginMatch[2].trim();
-      }
-    } else if (eventType.includes("CVE-2025-11371 LFI attempt")) eventType = "CVE-2025-11371 LFI attempt";
-    else if (eventType.includes("CVE-2025-11371 t.dn")) eventType = "CVE-2025-11371 t.dn request";
-    else if (eventType.includes("EXPLOIT filesvr.dn") || eventType.includes("CVE-2025-14611 EXPLOIT")) eventType = "CVE-2025-14611 EXPLOIT filesvr.dn";
-    else if (eventType.includes("CVE-2025-14611 filesvr.dn") || eventType.includes("filesvr.dn request")) eventType = "filesvr.dn request";
-    else if (eventType.startsWith("Request ")) eventType = eventType.split(/\s+/).slice(0, 3).join(" ");
-    else if (eventType.startsWith("Redirect ")) eventType = "Redirect";
-    else if (eventType.startsWith("Portal request")) eventType = "Portal request";
-    else if (eventType.startsWith("Static 200")) eventType = "Static 200";
-    else if (eventType.startsWith("404 Not found")) eventType = "404 Not found";
-    else if (eventType.startsWith("Favicon")) eventType = "Favicon";
-    const out = { date, ip, eventType: eventType || "other", ts };
-    if (loginUsername != null || loginPassword != null) {
-      out.loginUsername = loginUsername;
-      out.loginPassword = loginPassword;
-    }
-    return out;
-  },
-  ssh(_line) { return null; },
-  rdp(_line) { return null; },
-  ftp(_line) { return null; }
+const SOURCE_COLOURS = {
+  fortipot:       '#3b82f6',
+  centrestackpot: '#8b5cf6',
+  rdppot:         '#10b981',
+  ivantipot:      '#f59e0b',
+  unknown:        '#6b7280',
 };
 
-let chartTraffic = null;
-let chartTopIps = null;
-let chartEvents = null;
-
-function show(el, visible) {
-  if (!el) return;
-  el.classList.toggle('hidden', !visible);
+function sourceColour(name) {
+  return SOURCE_COLOURS[name] || COLOURS[Object.keys(SOURCE_COLOURS).length % COLOURS.length];
 }
 
-function escapeHtml(s) {
-  if (!s) return "";
+// Destroy and replace a chart instance safely
+const _charts = {};
+function makeChart(id, config) {
+  const ctx = document.getElementById(id);
+  if (!ctx) return null;
+  if (_charts[id]) _charts[id].destroy();
+  _charts[id] = new Chart(ctx, config);
+  return _charts[id];
+}
+
+function escHtml(s) {
+  if (!s) return '';
   return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function parseLogLines(text, honeypotType) {
-  const parser = LOG_PARSERS[honeypotType] || LOG_PARSERS.fortipot;
-  const entries = [];
-  const lines = text.split(/\r?\n/);
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const parsed = parser(trimmed);
-    if (parsed) entries.push(parsed);
+function fmtNum(n) {
+  return Number(n || 0).toLocaleString();
+}
+
+function show(id, visible) {
+  const el = typeof id === 'string' ? document.getElementById(id) : id;
+  if (el) el.classList.toggle('hidden', !visible);
+}
+
+// -------------------------------------------------------------------------
+// Data fetch
+// -------------------------------------------------------------------------
+
+async function fetchStats() {
+  const url = STATS_RAW_URL + '?nocache=' + Date.now();
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`HTTP ${res.status} fetching stats.json`);
+  return res.json();
+}
+
+// -------------------------------------------------------------------------
+// Date-range filter for events_per_day
+// -------------------------------------------------------------------------
+
+function filterDays(eventsPerDay, days) {
+  if (!eventsPerDay) return {};
+  const allDays = Object.keys(eventsPerDay).sort();
+  if (days === 'all') return eventsPerDay;
+  const n = parseInt(days, 10);
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - n);
+  const cutStr = cutoff.toISOString().slice(0, 10);
+  const filtered = {};
+  for (const d of allDays) {
+    if (d >= cutStr) filtered[d] = eventsPerDay[d];
   }
-  return entries;
+  return filtered;
 }
 
-/** Cache-bust query string so updated repo content is fetched after you push changes */
-function cacheBust() {
-  return "?nocache=" + Date.now();
-}
+// -------------------------------------------------------------------------
+// Render helpers
+// -------------------------------------------------------------------------
 
-async function listLogFiles(folder) {
-  const url = `${GITHUB_API_BASE}/${LOGS_REPO}/contents/${folder}${cacheBust()}`;
-  const res = await fetch(url, {
-    headers: { Accept: "application/vnd.github.v3+json" },
-    cache: "no-store"
-  });
-  if (!res.ok) throw new Error(`Failed to list ${folder}: ${res.status}`);
-  const data = await res.json();
-  if (!Array.isArray(data)) throw new Error("Invalid API response");
-  const logFiles = data
-    .filter(f => f.type === "file" && /^\d{4}-\d{2}-\d{2}_.*\.log$/.test(f.name))
-    .map(f => f.name)
-    .sort();
-  return logFiles;
-}
-
-/**
- * Fetch log file content. Uses GitHub API with raw media type so large files
- * (e.g. 12k+ events, 1–100 MB) are returned in full; default JSON+base64 is limited to 1 MB.
- */
-async function fetchLogContent(folder, filename) {
-  const path = `${folder}/${encodeURIComponent(filename)}`;
-  const url = `${GITHUB_API_BASE}/${LOGS_REPO}/contents/${path}${cacheBust()}`;
-  const res = await fetch(url, {
-    headers: { Accept: "application/vnd.github.v3.raw" },
-    cache: "no-store"
-  });
-  if (!res.ok) return "";
-  try {
-    return await res.text();
-  } catch (_) {
-    return "";
-  }
-}
-
-function aggregate(entries) {
-  const byDate = {};
-  const byIp = {};
-  const byEvent = {};
-  const loginAttempts = [];
-  for (const e of entries) {
-    if (e.date) byDate[e.date] = (byDate[e.date] || 0) + 1;
-    if (e.ip) byIp[e.ip] = (byIp[e.ip] || 0) + 1;
-    const ev = e.eventType || 'other';
-    byEvent[ev] = (byEvent[ev] || 0) + 1;
-    if (e.loginUsername !== undefined || e.loginPassword !== undefined) {
-      loginAttempts.push({
-        ts: e.ts,
-        date: e.date,
-        ip: e.ip,
-        username: e.loginUsername ?? '',
-        password: e.loginPassword ?? ''
-      });
-    }
-  }
-  return { byDate, byIp, byEvent, total: entries.length, loginAttempts };
-}
-
-function getDateRange(days) {
-  const end = new Date();
-  const start = new Date();
-  if (days === 'all') return { start: new Date(2000, 0, 1), end };
-  start.setDate(start.getDate() - parseInt(days, 10));
-  return { start, end };
-}
-
-function filterFilesByDate(files, dateRange) {
-  const { start, end } = dateRange;
-  const startStr = start.toISOString().slice(0, 10);
-  const endStr = end.toISOString().slice(0, 10);
-  return files.filter(f => {
-    const dateStr = f.slice(0, 10);
-    return dateStr >= startStr && dateStr <= endStr;
-  });
-}
-
-/** Folder name in repo -> parser key (fortipot, centrestackpot, etc.) */
-function folderToParserKey(folder) {
-  if (folder === 'fortipot' || folder === 'centrestackpot') return folder;
-  return 'fortipot';
-}
-
-async function loadAndParseLogs(folder, dateRange) {
-  const files = await listLogFiles(folder);
-  const filtered = filterFilesByDate(files, dateRange);
-  const parserKey = folderToParserKey(folder);
-  const allEntries = [];
-  for (const filename of filtered) {
-    const text = await fetchLogContent(folder, filename);
-    const entries = parseLogLines(text, parserKey);
-    allEntries.push(...entries);
-  }
-  return aggregate(allEntries);
-}
-
-function renderSummary(stats, folder) {
-  const el = document.getElementById('stats-summary');
+function renderSummary(stats) {
+  const el = document.getElementById('summary-grid');
   if (!el) return;
-  el.innerHTML = `
-    <div class="stats-summary-grid">
-      <div class="stats-summary-card">
-        <span class="stats-summary-value">${stats.total.toLocaleString()}</span>
-        <span class="stats-summary-label">Total events</span>
-      </div>
-      <div class="stats-summary-card">
-        <span class="stats-summary-value">${Object.keys(stats.byIp).length}</span>
-        <span class="stats-summary-label">Unique IPs</span>
-      </div>
-      <div class="stats-summary-card">
-        <span class="stats-summary-value">${Object.keys(stats.byDate).length}</span>
-        <span class="stats-summary-label">Days with data</span>
-      </div>
-    </div>
-  `;
+  const daysWithData = Object.keys(stats.events_per_day || {}).length;
+  const honeypots = (stats.honeypots || []).join(', ') || '—';
+  el.innerHTML = [
+    ['Total events',   fmtNum(stats.total_events)],
+    ['Unique IPs',     fmtNum(stats.unique_ips)],
+    ['Days with data', fmtNum(daysWithData)],
+    ['CVEs detected',  fmtNum((stats.cve_attempts || []).length)],
+    ['ASNs observed',  fmtNum((stats.top_asns || []).length)],
+  ].map(([label, value]) => `
+    <div class="summary-card">
+      <span class="summary-value">${value}</span>
+      <span class="summary-label">${escHtml(label)}</span>
+    </div>`).join('');
 }
 
-function renderTrafficChart(byDate) {
-  const dates = Object.keys(byDate).sort();
-  const counts = dates.map(d => byDate[d]);
-  const ctx = document.getElementById('chart-traffic');
-  if (!ctx) return;
-  if (chartTraffic) chartTraffic.destroy();
-  chartTraffic = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: dates,
-      datasets: [{
-        label: 'Events per day',
-        data: counts,
-        borderColor: 'rgb(59, 130, 246)',
-        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-        fill: true,
-        tension: 0.2
-      }]
-    },
+function renderMeta(stats) {
+  const el = document.getElementById('meta-line');
+  if (!el) return;
+  const ts = stats.generated_at
+    ? new Date(stats.generated_at).toUTCString()
+    : 'unknown';
+  const honeypots = (stats.honeypots || []).map(h =>
+    `<span class="badge badge-source">${escHtml(h)}</span>`).join(' ');
+  el.innerHTML = `Stats generated: ${escHtml(ts)} &nbsp;|&nbsp; Honeypots: ${honeypots || '—'} &nbsp;|&nbsp;
+    Source: <a href="https://github.com/seckid/logs/blob/main/stats/stats.json" target="_blank" rel="noopener">seckid/logs/stats/stats.json</a>`;
+}
+
+function renderTrafficChart(eventsPerDay, honeypots) {
+  const filtered = eventsPerDay;
+  const days = Object.keys(filtered).sort();
+  if (!days.length) return;
+
+  const sources = (honeypots || []).filter(s => s !== 'total');
+
+  const datasets = sources.map(src => ({
+    label: src,
+    data: days.map(d => (filtered[d] || {})[src] || 0),
+    backgroundColor: sourceColour(src),
+    borderColor: sourceColour(src),
+    borderWidth: 1,
+    stack: 'events',
+  }));
+
+  makeChart('chart-traffic', {
+    type: 'bar',
+    data: { labels: days, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: true,
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { position: 'top', labels: { color: '#9ca3af', padding: 10 } },
+        tooltip: {
+          callbacks: {
+            footer: (items) => {
+              const total = items.reduce((s, i) => s + i.parsed.y, 0);
+              return `Total: ${total.toLocaleString()}`;
+            },
+          },
+        },
+      },
       scales: {
-        y: { beginAtZero: true, grid: { color: 'rgba(45, 55, 72, 0.5)' }, ticks: { color: '#9ca3af' } },
-        x: { grid: { color: 'rgba(45, 55, 72, 0.5)' }, ticks: { color: '#9ca3af', maxRotation: 45 } }
-      }
-    }
+        x: { stacked: true, grid: { color: 'rgba(45,55,72,.4)' }, ticks: { color: '#9ca3af', maxRotation: 45 } },
+        y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(45,55,72,.4)' }, ticks: { color: '#9ca3af' } },
+      },
+    },
   });
 }
 
-function renderTopIps(byIp, limit = 15) {
-  const sorted = Object.entries(byIp).sort((a, b) => b[1] - a[1]).slice(0, limit);
-  const labels = sorted.map(([ip]) => ip);
-  const data = sorted.map(([, n]) => n);
-  const ctx = document.getElementById('chart-top-ips');
-  const tbody = document.querySelector('#table-top-ips tbody');
-  if (ctx) {
-    if (chartTopIps) chartTopIps.destroy();
-    chartTopIps = new Chart(ctx, {
-      type: "bar",
-      data: {
-        labels: labels,
-        datasets: [{ label: "Requests", data: data, backgroundColor: "rgba(139, 92, 246, 0.7)", borderColor: "rgb(139, 92, 246)", borderWidth: 1 }]
+function renderSourcesChart(totals) {
+  const entries = Object.entries(totals || {}).sort((a, b) => b[1] - a[1]);
+  if (!entries.length) return;
+  makeChart('chart-sources', {
+    type: 'doughnut',
+    data: {
+      labels: entries.map(([k]) => k),
+      datasets: [{
+        data: entries.map(([, v]) => v),
+        backgroundColor: entries.map(([k]) => sourceColour(k)),
+        borderColor: 'var(--bg-secondary,#1a1f2e)',
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#9ca3af', padding: 8 } },
+        tooltip: { callbacks: { label: (c) => ` ${c.label}: ${c.parsed.toLocaleString()}` } },
       },
-      options: {
-        indexAxis: "y",
-        responsive: true,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { beginAtZero: true, grid: { color: "rgba(45, 55, 72, 0.5)" }, ticks: { color: "#9ca3af" } },
-          y: { grid: { display: false }, ticks: { color: "#9ca3af", font: { family: "JetBrains Mono" } } }
-        }
-      }
-    });
-  }
-  if (tbody) {
-    tbody.innerHTML = sorted.map(([ip, n]) => `<tr><td><code>${ip}</code></td><td>${n.toLocaleString()}</td></tr>`).join('');
-  }
+    },
+  });
 }
 
-function renderEvents(byEvent, limit = 12) {
-  const sorted = Object.entries(byEvent).sort((a, b) => b[1] - a[1]).slice(0, limit);
-  const fullLabels = sorted.map(([ev]) => ev);
-  const shortLabel = (s, maxLen) => (s.length <= maxLen ? s : s.slice(0, maxLen - 1) + "\u2026");
-  const chartLabels = fullLabels.map((s) => shortLabel(s, 40));
-  const data = sorted.map(([, n]) => n);
-  const colors = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#84cc16', '#6366f1', '#14b8a6', '#f97316', '#a855f7'];
-  const ctx = document.getElementById('chart-events');
-  const tbody = document.querySelector('#table-events tbody');
-  if (ctx) {
-    if (chartEvents) chartEvents.destroy();
-    chartEvents = new Chart(ctx, {
-      type: "pie",
-      data: {
-        labels: chartLabels,
-        datasets: [{ data, backgroundColor: colors.slice(0, data.length), borderColor: "var(--bg-secondary)", borderWidth: 1 }]
+function renderMethodsChart(methods) {
+  const entries = Object.entries(methods || {}).sort((a, b) => b[1] - a[1]);
+  if (!entries.length) return;
+  makeChart('chart-methods', {
+    type: 'bar',
+    data: {
+      labels: entries.map(([k]) => k),
+      datasets: [{
+        label: 'Count',
+        data: entries.map(([, v]) => v),
+        backgroundColor: entries.map((_, i) => COLOURS[i % COLOURS.length]),
+        borderWidth: 0,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, grid: { color: 'rgba(45,55,72,.4)' }, ticks: { color: '#9ca3af' } },
+        y: { grid: { display: false }, ticks: { color: '#9ca3af', font: { family: 'JetBrains Mono' } } },
       },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: { position: "right", labels: { color: "#9ca3af", padding: 8 } },
-          tooltip: {
-            callbacks: {
-              label: function (context) {
-                const full = fullLabels[context.dataIndex];
-                const count = context.parsed;
-                const total = context.dataset.data.reduce(function (a, b) { return a + b; }, 0);
-                const pctStr = total ? ((100 * count) / total).toFixed(1) : "0";
-                return full + " \u2014 " + count.toLocaleString() + " (" + pctStr + "%)";
-              }
-            }
-          }
-        }
-      }
-    });
-  }
-  if (tbody) {
-    tbody.innerHTML = sorted
-      .map(
-        ([ev, n]) =>
-          '<tr><td class="event-cell" title="' +
-          escapeHtml(ev) +
-          '"><code class="event-text">' +
-          escapeHtml(ev) +
-          "</code></td><td>" +
-          n.toLocaleString() +
-          "</td></tr>"
-      )
-      .join("");
-  }
+    },
+  });
 }
 
-function renderLoginAttempts(loginAttempts, limit = 200) {
-  const tbody = document.querySelector('#table-login-attempts tbody');
+function renderAsnsChart(asns) {
+  const top = (asns || []).slice(0, 15);
+  if (!top.length) return;
+  makeChart('chart-asns', {
+    type: 'bar',
+    data: {
+      labels: top.map(a => a.asn || a.name || '?'),
+      datasets: [{
+        label: 'Events',
+        data: top.map(a => a.event_count),
+        backgroundColor: 'rgba(139,92,246,.75)',
+        borderColor: 'rgb(139,92,246)',
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, grid: { color: 'rgba(45,55,72,.4)' }, ticks: { color: '#9ca3af' } },
+        y: { grid: { display: false }, ticks: { color: '#9ca3af', font: { family: 'JetBrains Mono', size: 11 } } },
+      },
+    },
+  });
+}
+
+function renderTable(tableId, rows) {
+  const tbody = document.querySelector(`#${tableId} tbody`);
   if (!tbody) return;
-  const sorted = (loginAttempts || []).slice().reverse().slice(0, limit);
-  tbody.innerHTML = sorted
-    .map(
-      (row) =>
-        '<tr><td class="login-ts">' +
-        escapeHtml(row.ts || '') +
-        '</td><td><code>' +
-        escapeHtml(row.ip || '') +
-        '</code></td><td class="login-username">' +
-        escapeHtml(row.username || '') +
-        '</td><td class="login-password">' +
-        escapeHtml(row.password || '') +
-        '</td></tr>'
-    )
-    .join('');
+  tbody.innerHTML = rows.join('');
 }
 
-function renderCharts(stats, honeypotType) {
-  if (typeof Chart === 'undefined') {
-    console.error('Chart.js did not load');
+function renderCves(cves) {
+  if (!cves || !cves.length) {
+    renderTable('table-cves', ['<tr><td colspan="3" style="color:#6b7280">No CVE attempts recorded.</td></tr>']);
     return;
   }
-  try {
-    renderSummary(stats, honeypotType);
-  } catch (e) {
-    console.error('renderSummary', e);
-  }
-  try {
-    renderTrafficChart(stats.byDate);
-  } catch (e) {
-    console.error('renderTrafficChart', e);
-  }
-  try {
-    renderTopIps(stats.byIp);
-  } catch (e) {
-    console.error('renderTopIps', e);
-  }
-  try {
-    renderEvents(stats.byEvent);
-  } catch (e) {
-    console.error('renderEvents', e);
-  }
-  const loginSection = document.getElementById('login-attempts-section');
-  const showLogin = honeypotType === 'fortipot' || honeypotType === 'centrestackpot';
-  if (loginSection) loginSection.classList.toggle('hidden', !showLogin);
-  if (showLogin) {
-    try {
-      renderLoginAttempts(stats.loginAttempts);
-    } catch (e) {
-      console.error('renderLoginAttempts', e);
-    }
-  }
+  renderTable('table-cves', cves.map(c => `
+    <tr>
+      <td><span class="badge badge-cve">${escHtml(c.cve)}</span></td>
+      <td>${fmtNum(c.count)}</td>
+      <td>${(c.sources || []).map(s => `<span class="badge badge-source">${escHtml(s)}</span>`).join(' ')}</td>
+    </tr>`));
 }
 
-const HONEYPOT_FOLDERS = {
-  fortipot: 'fortipot',
-  centrestackpot: 'centrestackpot',
-  ssh: null,
-  rdp: null,
-  ftp: null
-};
+function renderAsnsTable(asns) {
+  if (!asns || !asns.length) {
+    renderTable('table-asns', ['<tr><td colspan="5" style="color:#6b7280">No ASN data yet.</td></tr>']);
+    return;
+  }
+  renderTable('table-asns', asns.map(a => `
+    <tr>
+      <td><code>${escHtml(a.asn)}</code></td>
+      <td>${escHtml(a.name)}</td>
+      <td>${escHtml(a.country)}</td>
+      <td>${fmtNum(a.event_count)}</td>
+      <td>${fmtNum(a.ip_count)}</td>
+    </tr>`));
+}
+
+function renderPaths(paths) {
+  if (!paths || !paths.length) {
+    renderTable('table-paths', ['<tr><td colspan="3" style="color:#6b7280">No path data.</td></tr>']);
+    return;
+  }
+  renderTable('table-paths', paths.map(p => `
+    <tr>
+      <td><code>${escHtml(p.path)}</code></td>
+      <td><span class="badge badge-source">${escHtml(p.source)}</span></td>
+      <td>${fmtNum(p.count)}</td>
+    </tr>`));
+}
+
+function renderUserAgents(uas) {
+  if (!uas || !uas.length) {
+    renderTable('table-uas', ['<tr><td colspan="2" style="color:#6b7280">No user agent data.</td></tr>']);
+    return;
+  }
+  renderTable('table-uas', uas.map(u => `
+    <tr>
+      <td style="word-break:break-all;font-size:.8rem">${escHtml(u.user_agent)}</td>
+      <td>${fmtNum(u.count)}</td>
+    </tr>`));
+}
+
+function renderCredentials(creds) {
+  if (!creds || !creds.length) {
+    renderTable('table-creds', ['<tr><td colspan="3" style="color:#6b7280">No credentials captured.</td></tr>']);
+    return;
+  }
+  renderTable('table-creds', creds.map(c => `
+    <tr>
+      <td><code>${escHtml(c.username)}</code></td>
+      <td><code>${escHtml(c.password)}</code></td>
+      <td>${fmtNum(c.count)}</td>
+    </tr>`));
+}
+
+// -------------------------------------------------------------------------
+// Main render orchestrator
+// -------------------------------------------------------------------------
+
+function renderAll(stats, days) {
+  renderMeta(stats);
+  renderSummary(stats);
+
+  const filtered = filterDays(stats.events_per_day, days);
+  renderTrafficChart(filtered, stats.honeypots);
+  renderSourcesChart(stats.totals_by_source);
+  renderMethodsChart(stats.method_counts);
+  renderAsnsChart(stats.top_asns);
+  renderCves(stats.cve_attempts);
+  renderAsnsTable(stats.top_asns);
+  renderPaths(stats.top_paths);
+  renderUserAgents(stats.top_user_agents);
+  renderCredentials(stats.top_credentials);
+}
+
+// -------------------------------------------------------------------------
+// Entry point
+// -------------------------------------------------------------------------
+
+let _cachedStats = null;
 
 async function runStats() {
-  const honeypotType = document.getElementById('honeypot-type').value;
-  const folder = HONEYPOT_FOLDERS[honeypotType];
-  const dateRangeVal = document.getElementById('date-range').value;
+  const days = document.getElementById('date-range')?.value || '30';
   const loadBtn = document.getElementById('load-stats');
-  const loadingEl = document.getElementById('stats-loading');
-  const errorEl = document.getElementById('stats-error');
-  const contentEl = document.getElementById('stats-content');
 
-  if (!folder) {
-    show(contentEl, false);
-    show(loadingEl, false);
-    show(errorEl, true);
-    errorEl.innerHTML = '<p>Only FortiPot and CentreStack logs are available at the moment. SSH, RDP, and FTP will be added when logs are available in the repo.</p>';
-    return;
-  }
-
-  show(errorEl, false);
-  show(contentEl, false);
-  show(loadingEl, true);
+  show('stats-error', false);
+  show('stats-content', false);
+  show('stats-loading', true);
   if (loadBtn) loadBtn.disabled = true;
 
   try {
     if (typeof Chart === 'undefined') {
-      throw new Error('Chart.js failed to load. Check your connection or try disabling ad blockers.');
+      throw new Error('Chart.js failed to load — check your connection or ad-blocker.');
     }
 
-    const dateRange = getDateRange(dateRangeVal);
-    const stats = await loadAndParseLogs(folder, dateRange);
+    // Only re-fetch if not cached (date-range changes just re-render from cache)
+    if (!_cachedStats || (loadBtn && !loadBtn._fromCache)) {
+      _cachedStats = await fetchStats();
+    }
 
-    show(loadingEl, false);
-    if (loadBtn) loadBtn.disabled = false;
+    show('stats-loading', false);
+    if (loadBtn) { loadBtn.disabled = false; loadBtn._fromCache = false; }
 
-    if (stats.total === 0) {
-      show(errorEl, true);
-      errorEl.innerHTML = '<p>No log entries found for the selected period. Data is pulled from <a href="https://github.com/seckid/logs" target="_blank" rel="noopener">github.com/seckid/logs</a>.</p>';
+    if (!_cachedStats || !_cachedStats.total_events) {
+      show('stats-error', true);
+      document.getElementById('stats-error').innerHTML =
+        '<p>Stats file is empty or unavailable. Data is updated hourly from ' +
+        '<a href="https://github.com/seckid/logs" target="_blank" rel="noopener">github.com/seckid/logs</a>.</p>';
       return;
     }
 
-    show(contentEl, true);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => renderCharts(stats, honeypotType));
-    });
+    show('stats-content', true);
+    requestAnimationFrame(() => requestAnimationFrame(() => renderAll(_cachedStats, days)));
+
   } catch (err) {
-    show(loadingEl, false);
-    if (loadBtn) loadBtn.disabled = false;
-    show(errorEl, true);
-    errorEl.innerHTML = `<p><strong>Error:</strong> ${err.message}. GitHub API may be rate-limited (60 req/hour unauthenticated). Try again later or check the repo <a href="https://github.com/seckid/logs" target="_blank" rel="noopener">seckid/logs</a>.</p>`;
+    show('stats-loading', false);
+    if (loadBtn) { loadBtn.disabled = false; }
+    show('stats-error', true);
+    document.getElementById('stats-error').innerHTML =
+      `<p><strong>Error:</strong> ${escHtml(err.message)}. ` +
+      `Stats are pushed hourly to <a href="https://github.com/seckid/logs" ` +
+      `target="_blank" rel="noopener">seckid/logs</a> — try again shortly.</p>`;
   }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('load-stats')?.addEventListener('click', runStats);
+  document.getElementById('load-stats')?.addEventListener('click', () => {
+    _cachedStats = null; // force re-fetch on manual refresh
+    runStats();
+  });
+
+  // Re-render with new date range without re-fetching
+  document.getElementById('date-range')?.addEventListener('change', () => {
+    if (_cachedStats) {
+      const btn = document.getElementById('load-stats');
+      if (btn) btn._fromCache = true;
+      runStats();
+    }
+  });
+
   runStats();
 });

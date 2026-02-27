@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Honeypot statistics - Traffic, top IPs, and events from SecurityKid honeypots">
+    <meta name="description" content="Honeypot statistics — traffic, credentials, CVE attempts, ASNs and more from SecurityKid honeypots">
     <title>Honeypot Statistics - SecurityKid</title>
     <link rel="icon" href="logo.png" type="image/png">
     <link rel="stylesheet" href="styles.css">
@@ -11,6 +11,51 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        /* ---- stats-specific overrides ---- */
+        .stats-controls { display:flex; flex-wrap:wrap; gap:.75rem; align-items:center; margin-bottom:1.5rem; }
+        .stats-controls label { color:var(--text-secondary,#9ca3af); font-size:.875rem; }
+        .stats-controls select { background:var(--bg-secondary,#1a1f2e); color:var(--text-primary,#e2e8f0);
+            border:1px solid var(--border,#2d3748); border-radius:.375rem; padding:.4rem .75rem; font-size:.875rem; }
+        .btn-primary { background:#3b82f6; color:#fff; border:none; border-radius:.375rem;
+            padding:.45rem 1.1rem; font-size:.875rem; cursor:pointer; font-weight:500; }
+        .btn-primary:hover { background:#2563eb; }
+        .btn-primary:disabled { opacity:.5; cursor:not-allowed; }
+        .hidden { display:none !important; }
+        .stats-loading, .stats-error { padding:1rem; border-radius:.5rem; margin:1rem 0; }
+        .stats-loading { background:var(--bg-secondary,#1a1f2e); color:var(--text-secondary,#9ca3af); }
+        .stats-error { background:#1f1315; border:1px solid #7f1d1d; color:#fca5a5; }
+        .stats-error a { color:#f87171; }
+
+        .summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:1rem; margin-bottom:2rem; }
+        .summary-card { background:var(--bg-secondary,#1a1f2e); border:1px solid var(--border,#2d3748);
+            border-radius:.5rem; padding:1rem 1.25rem; text-align:center; }
+        .summary-value { display:block; font-size:1.75rem; font-weight:700; color:#3b82f6; line-height:1.1; }
+        .summary-label { display:block; font-size:.78rem; color:var(--text-secondary,#9ca3af); margin-top:.25rem; }
+
+        .section-title { font-size:1.1rem; font-weight:600; color:var(--text-primary,#e2e8f0);
+            margin:2rem 0 .75rem; border-left:3px solid #3b82f6; padding-left:.6rem; }
+        .chart-container { background:var(--bg-secondary,#1a1f2e); border:1px solid var(--border,#2d3748);
+            border-radius:.5rem; padding:1rem; margin-bottom:1.5rem; }
+        .chart-container canvas { max-height:320px; }
+        .chart-half canvas { max-height:260px; }
+        .two-col { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1.5rem; }
+        @media(max-width:700px){ .two-col { grid-template-columns:1fr; } }
+
+        .stats-table { width:100%; border-collapse:collapse; font-size:.82rem; }
+        .stats-table th { text-align:left; color:var(--text-secondary,#9ca3af); font-weight:500;
+            border-bottom:1px solid var(--border,#2d3748); padding:.4rem .6rem; }
+        .stats-table td { padding:.35rem .6rem; border-bottom:1px solid rgba(45,55,72,.4); color:var(--text-primary,#e2e8f0); word-break:break-all; }
+        .stats-table tr:last-child td { border-bottom:none; }
+        .table-wrapper { background:var(--bg-secondary,#1a1f2e); border:1px solid var(--border,#2d3748);
+            border-radius:.5rem; padding:.5rem 0; overflow-x:auto; max-height:360px; overflow-y:auto; }
+        .badge { display:inline-block; background:#1e3a5f; color:#93c5fd; border-radius:.25rem;
+            padding:.1rem .45rem; font-size:.72rem; font-family:'JetBrains Mono',monospace; margin:.1rem .1rem 0 0; }
+        .badge-cve { background:#1f2937; color:#f9a8d4; }
+        .badge-source { background:#14291a; color:#6ee7b7; }
+        .meta-line { font-size:.78rem; color:var(--text-secondary,#9ca3af); margin-bottom:1.5rem; }
+        .meta-line a { color:#60a5fa; }
+    </style>
 </head>
 <body>
     <header class="header">
@@ -34,77 +79,113 @@
         <section class="hero hero-stats">
             <div class="hero-content">
                 <h1 class="hero-title">Honeypot Statistics</h1>
-                <p class="hero-subtitle">Traffic, top sources, and events from honeypot logs (FortiPot, CentreStack, SSH, RDP, FTP)</p>
+                <p class="hero-subtitle">Live threat intelligence from FortiPot, CentreStack, RDP and SSH honeypots — updated hourly</p>
             </div>
         </section>
 
         <section class="stats-section">
             <div class="container">
+
+                <!-- Controls -->
                 <div class="stats-controls">
-                    <label for="honeypot-type">Honeypot type</label>
-                    <select id="honeypot-type">
-                        <option value="fortipot" selected>FortiPot (HTTPS/SSL-VPN)</option>
-                        <option value="centrestackpot">CentreStack (File sharing platform)</option>
-                        <option value="ssh">SSH (coming soon)</option>
-                        <option value="rdp">RDP (coming soon)</option>
-                        <option value="ftp">FTP (coming soon)</option>
-                    </select>
-                    <label for="date-range">Show last</label>
+                    <label for="date-range">Traffic chart — show last</label>
                     <select id="date-range">
                         <option value="7">7 days</option>
                         <option value="14">14 days</option>
                         <option value="30" selected>30 days</option>
                         <option value="90">90 days</option>
-                        <option value="all">All time</option>
+                        <option value="all">All available</option>
                     </select>
-                    <button type="button" id="load-stats" class="btn-primary">Load statistics</button>
+                    <button type="button" id="load-stats" class="btn-primary">Refresh</button>
                 </div>
 
                 <div id="stats-loading" class="stats-loading hidden">
-                    <p>Fetching log files from <a href="https://github.com/seckid/logs" target="_blank" rel="noopener noreferrer">github.com/seckid/logs</a>...</p>
+                    <p>Loading statistics from <a href="https://github.com/seckid/logs" target="_blank" rel="noopener noreferrer">github.com/seckid/logs</a>…</p>
                 </div>
                 <div id="stats-error" class="stats-error hidden"></div>
-                <div id="stats-content" class="stats-content hidden">
-                    <div class="stats-summary" id="stats-summary"></div>
+
+                <div id="stats-content" class="hidden">
+
+                    <!-- Meta line -->
+                    <p class="meta-line" id="meta-line"></p>
+
+                    <!-- Summary cards -->
+                    <div class="summary-grid" id="summary-grid"></div>
+
+                    <!-- Traffic over time -->
                     <h2 class="section-title">Traffic over time</h2>
                     <div class="chart-container">
                         <canvas id="chart-traffic"></canvas>
                     </div>
-                    <h2 class="section-title">Top IP addresses</h2>
-                    <div class="stats-two-col">
+
+                    <!-- Honeypot breakdown + Methods -->
+                    <div class="two-col">
+                        <div>
+                            <h2 class="section-title">Events by honeypot</h2>
+                            <div class="chart-container chart-half">
+                                <canvas id="chart-sources"></canvas>
+                            </div>
+                        </div>
+                        <div>
+                            <h2 class="section-title">HTTP methods</h2>
+                            <div class="chart-container chart-half">
+                                <canvas id="chart-methods"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- CVE attempts -->
+                    <h2 class="section-title">CVE exploitation attempts</h2>
+                    <div class="table-wrapper">
+                        <table class="stats-table" id="table-cves">
+                            <thead><tr><th>CVE</th><th>Count</th><th>Honeypots</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Top ASNs -->
+                    <h2 class="section-title">Top ASNs observed</h2>
+                    <div class="two-col">
                         <div class="chart-container chart-half">
-                            <canvas id="chart-top-ips"></canvas>
+                            <canvas id="chart-asns"></canvas>
                         </div>
                         <div class="table-wrapper">
-                            <table class="stats-table" id="table-top-ips">
-                                <thead><tr><th>IP address</th><th>Requests</th></tr></thead>
+                            <table class="stats-table" id="table-asns">
+                                <thead><tr><th>ASN</th><th>Organisation</th><th>Country</th><th>Events</th><th>IPs</th></tr></thead>
                                 <tbody></tbody>
                             </table>
                         </div>
                     </div>
-                    <h2 class="section-title">Event types</h2>
-                    <div class="stats-two-col">
-                        <div class="chart-container chart-half">
-                            <canvas id="chart-events"></canvas>
-                        </div>
-                        <div class="table-wrapper">
-                            <table class="stats-table" id="table-events">
-                                <thead><tr><th>Event type</th><th>Count</th></tr></thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
+
+                    <!-- Top paths -->
+                    <h2 class="section-title">Top requested paths</h2>
+                    <div class="table-wrapper">
+                        <table class="stats-table" id="table-paths">
+                            <thead><tr><th>Path</th><th>Honeypot</th><th>Count</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
                     </div>
-                    <div id="login-attempts-section">
-                        <h2 class="section-title">Login attempts (username / password)</h2>
-                        <p class="stats-table-caption">Credentials attempted (last 200, most recent first).</p>
-                        <div class="table-wrapper table-login-attempts">
-                            <table class="stats-table" id="table-login-attempts">
-                                <thead><tr><th>Time</th><th>IP address</th><th>Username</th><th>Password</th></tr></thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
+
+                    <!-- Top user agents -->
+                    <h2 class="section-title">Top 5 user agents</h2>
+                    <div class="table-wrapper">
+                        <table class="stats-table" id="table-uas">
+                            <thead><tr><th>User agent</th><th>Count</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
                     </div>
-                </div>
+
+                    <!-- Credentials -->
+                    <h2 class="section-title">Login credentials captured</h2>
+                    <p class="meta-line">Top 50 username / password combinations (all-time).</p>
+                    <div class="table-wrapper">
+                        <table class="stats-table" id="table-creds">
+                            <thead><tr><th>Username</th><th>Password</th><th>Count</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                </div><!-- /stats-content -->
             </div>
         </section>
     </main>
@@ -112,7 +193,7 @@
     <footer class="footer">
         <div class="container">
             <p>&copy; 2024 SecurityKid. All rights reserved.</p>
-            <p class="footer-note">Logs from <a href="https://github.com/seckid/logs" target="_blank" rel="noopener noreferrer">seckid/logs</a></p>
+            <p class="footer-note">Stats from <a href="https://github.com/seckid/logs" target="_blank" rel="noopener noreferrer">seckid/logs</a> · updated hourly</p>
         </div>
     </footer>
 
