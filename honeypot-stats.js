@@ -67,8 +67,13 @@ function show(id, visible) {
 // -------------------------------------------------------------------------
 
 async function fetchStats() {
-  const url = STATS_RAW_URL + '?nocache=' + Date.now();
-  const res = await fetch(url, { cache: 'no-store' });
+  // cache: 'reload' sends Cache-Control: no-cache to the CDN (Fastly on
+  // raw.githubusercontent.com), forcing a revalidation from GitHub's origin
+  // rather than serving a stale cached copy.
+  const res = await fetch(STATS_RAW_URL, {
+    cache: 'reload',
+    headers: { 'Pragma': 'no-cache' },
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status} fetching stats.json`);
   return res.json();
 }
