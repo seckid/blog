@@ -19,6 +19,7 @@ const SOURCE_COLOURS = {
   centrestackpot: '#8b5cf6',
   rdppot:         '#10b981',
   ivantipot:      '#f59e0b',
+  sharepointpot:  '#ef4444',
   unknown:        '#6b7280',
 };
 
