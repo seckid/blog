@@ -17,14 +17,31 @@ const COLOURS = [
 const SOURCE_COLOURS = {
   fortipot:       '#3b82f6',
   centrestackpot: '#8b5cf6',
-  rdppot:         '#10b981',
-  ivantipot:      '#f59e0b',
   sharepointpot:  '#ef4444',
+  ivantipot:      '#f59e0b',
+  bigippot:       '#06b6d4',
+  front:          '#10b981',
+  rdppot:         '#14b8a6',
   unknown:        '#6b7280',
 };
 
+function honeypotBaseName(name) {
+  if (!name) return 'unknown';
+  const raw = String(name).trim();
+  const base = raw.split(':')[0].trim().toLowerCase();
+  return base || 'unknown';
+}
+
 function sourceColour(name) {
-  return SOURCE_COLOURS[name] || COLOURS[Object.keys(SOURCE_COLOURS).length % COLOURS.length];
+  const base = honeypotBaseName(name);
+  if (SOURCE_COLOURS[base]) return SOURCE_COLOURS[base];
+
+  // Stable distinct colour for any future honeypot id
+  let hash = 0;
+  for (let i = 0; i < base.length; i++) {
+    hash = ((hash << 5) - hash + base.charCodeAt(i)) | 0;
+  }
+  return COLOURS[Math.abs(hash) % COLOURS.length];
 }
 
 // Destroy and replace a chart instance safely
