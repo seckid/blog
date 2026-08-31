@@ -1,0 +1,7 @@
+# Work-in-progress articles (Medium drafts) — not for GitHub Pages
+drafts/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
