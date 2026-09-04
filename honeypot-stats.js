@@ -1,13 +1,12 @@
 /**
  * Honeypot Statistics — reads stats/stats.json from github.com/seckid/logs
- * and renders charts/tables. No raw log parsing; all aggregation done server-side
- * by generate_and_upload_stats.py on threatapp-01 (updated hourly).
+ * and renders charts/tables. Aggregation is done server-side by
+ * generate_and_upload_stats.py on threatapp-01 (updated hourly).
  */
 
 const STATS_RAW_URL =
   'https://raw.githubusercontent.com/seckid/logs/main/stats/stats.json';
 
-// Chart.js colour palette
 const COLOURS = [
   '#3b82f6', '#8b5cf6', '#10b981', '#f59e0b',
   '#ef4444', '#06b6d4', '#ec4899', '#84cc16',
@@ -15,15 +14,27 @@ const COLOURS = [
 ];
 
 const SOURCE_COLOURS = {
-  fortipot:       '#3b82f6',
+  fortipot: '#3b82f6',
   centrestackpot: '#8b5cf6',
-  sharepointpot:  '#ef4444',
-  ivantipot:      '#f59e0b',
-  bigippot:       '#06b6d4',
-  front:          '#10b981',
-  rdppot:         '#14b8a6',
-  unknown:        '#6b7280',
+  sharepointpot: '#ef4444',
+  ivantipot: '#f59e0b',
+  bigippot: '#06b6d4',
+  front: '#10b981',
+  rdppot: '#14b8a6',
+  unknown: '#6b7280',
 };
+
+const SEVERITY_COLOURS = {
+  critical: '#ef4444',
+  high: '#f97316',
+  medium: '#f59e0b',
+  low: '#10b981',
+  unknown: '#6b7280',
+};
+
+const IP_CHIP_LIMIT = 5;
+const CHART_GRID = 'rgba(45,55,72,.4)';
+const CHART_TICK = '#9ca3af';
 
 function honeypotBaseName(name) {
   if (!name) return 'unknown';
@@ -35,8 +46,6 @@ function honeypotBaseName(name) {
 function sourceColour(name) {
   const base = honeypotBaseName(name);
   if (SOURCE_COLOURS[base]) return SOURCE_COLOURS[base];
-
-  // Stable distinct colour for any future honeypot id
   let hash = 0;
   for (let i = 0; i < base.length; i++) {
     hash = ((hash << 5) - hash + base.charCodeAt(i)) | 0;
@@ -44,7 +53,6 @@ function sourceColour(name) {
   return COLOURS[Math.abs(hash) % COLOURS.length];
 }
 
-// Destroy and replace a chart instance safely
 const _charts = {};
 function makeChart(id, config) {
   const ctx = document.getElementById(id);
@@ -75,19 +83,32 @@ function fmtNum(n) {
   return Number(n || 0).toLocaleString();
 }
 
+function truncateLabel(s, max = 42) {
+  const t = String(s || '');
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
 function show(id, visible) {
   const el = typeof id === 'string' ? document.getElementById(id) : id;
   if (el) el.classList.toggle('hidden', !visible);
 }
 
-// -------------------------------------------------------------------------
-// Data fetch
-// -------------------------------------------------------------------------
+function axisOpts(horizontal = false) {
+  const valueAxis = {
+    beginAtZero: true,
+    grid: { color: CHART_GRID },
+    ticks: { color: CHART_TICK },
+  };
+  const catAxis = {
+    grid: { display: false },
+    ticks: { color: CHART_TICK, font: { family: 'JetBrains Mono', size: 11 } },
+  };
+  return horizontal
+    ? { x: valueAxis, y: catAxis }
+    : { x: catAxis, y: valueAxis };
+}
 
 async function fetchStats() {
-  // Append a timestamp query param so each request is a unique URL — this busts
-  // Fastly's CDN cache on raw.githubusercontent.com without adding custom headers
-  // (custom headers like Cache-Control trigger a CORS preflight that GitHub rejects).
   const url = `${STATS_RAW_URL}?t=${Date.now()}`;
   const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) {
@@ -98,10 +119,6 @@ async function fetchStats() {
   }
   return res.json();
 }
-
-// -------------------------------------------------------------------------
-// Date-range filter for events_per_day
-// -------------------------------------------------------------------------
 
 function filterDays(eventsPerDay, days) {
   if (!eventsPerDay) return {};
@@ -118,24 +135,97 @@ function filterDays(eventsPerDay, days) {
   return filtered;
 }
 
-// -------------------------------------------------------------------------
-// Render helpers
-// -------------------------------------------------------------------------
+/** Prefer server `events_by_country`; else roll up from ASN event_count. */
+function countryEventCounts(stats) {
+  if (stats.events_by_country && typeof stats.events_by_country === 'object') {
+    return Object.entries(stats.events_by_country)
+      .map(([country, count]) => ({ country, count: Number(count) || 0 }))
+      .filter((r) => r.country && r.count > 0)
+      .sort((a, b) => b.count - a.count);
+  }
+  const map = {};
+  for (const a of stats.top_asns || []) {
+    const c = (a.country || '??').toUpperCase();
+    map[c] = (map[c] || 0) + (Number(a.event_count) || 0);
+  }
+  return Object.entries(map)
+    .map(([country, count]) => ({ country, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+/** Prefer server `cve_severity_counts`; else roll up from attempts. */
+function severityCounts(stats) {
+  if (stats.cve_severity_counts && typeof stats.cve_severity_counts === 'object') {
+    return Object.entries(stats.cve_severity_counts)
+      .map(([severity, count]) => ({ severity, count: Number(count) || 0 }))
+      .filter((r) => r.count > 0)
+      .sort((a, b) => b.count - a.count);
+  }
+  const map = {};
+  for (const c of stats.cve_attempts || []) {
+    const sev = (c.severity || 'Unknown').trim() || 'Unknown';
+    map[sev] = (map[sev] || 0) + (Number(c.count) || 0);
+  }
+  return Object.entries(map)
+    .map(([severity, count]) => ({ severity, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+function peakDay(eventsPerDay) {
+  let bestDay = null;
+  let bestTotal = 0;
+  for (const [day, row] of Object.entries(eventsPerDay || {})) {
+    const total = Number(row.total != null ? row.total : Object.entries(row)
+      .filter(([k]) => k !== 'total')
+      .reduce((s, [, v]) => s + (Number(v) || 0), 0));
+    if (total > bestTotal) {
+      bestTotal = total;
+      bestDay = day;
+    }
+  }
+  return { day: bestDay, total: bestTotal };
+}
 
 function renderSummary(stats) {
   const el = document.getElementById('summary-grid');
   if (!el) return;
+
   const daysWithData = Object.keys(stats.events_per_day || {}).length;
-  const honeypots = (stats.honeypots || []).join(', ') || '—';
-  el.innerHTML = [
-    ['Total events',   fmtNum(stats.total_events)],
-    ['Unique IPs',     fmtNum(stats.unique_ips)],
+  const honeypotCount = (stats.honeypots || []).length;
+  const cves = stats.cve_attempts || [];
+  const cveAttempts = cves.reduce((s, c) => s + (Number(c.count) || 0), 0);
+  const criticalCves = cves.filter((c) => String(c.severity || '').toLowerCase() === 'critical').length;
+  const peak = peakDay(stats.events_per_day);
+  const countries = countryEventCounts(stats);
+  const asns = stats.top_asns || [];
+  const topAsn = asns[0];
+  const asnEvents = asns.reduce((s, a) => s + (Number(a.event_count) || 0), 0);
+  const topAsnShare = topAsn && asnEvents
+    ? `${Math.round((topAsn.event_count / asnEvents) * 100)}%`
+    : '—';
+
+  const methods = stats.method_counts || {};
+  const methodTotal = Object.values(methods).reduce((s, v) => s + (Number(v) || 0), 0);
+  const getCount = Number(methods.GET || 0);
+  const getShare = methodTotal ? `${Math.round((getCount / methodTotal) * 100)}%` : '—';
+
+  const cards = [
+    ['Total events', fmtNum(stats.total_events)],
+    ['Unique IPs', fmtNum(stats.unique_ips)],
+    ['Active honeypots', fmtNum(honeypotCount)],
     ['Days with data', fmtNum(daysWithData)],
-    ['CVEs detected',  fmtNum((stats.cve_attempts || []).length)],
-    ['ASNs observed',  fmtNum((stats.top_asns || []).length)],
-  ].map(([label, value]) => `
-    <div class="summary-card">
-      <span class="summary-value">${value}</span>
+    ['Peak day volume', peak.day ? fmtNum(peak.total) : '—', peak.day || 'No peak yet', true],
+    ['CVE IDs / attempts', `${fmtNum(cves.length)} / ${fmtNum(cveAttempts)}`, null, true],
+    ['Critical CVEs', fmtNum(criticalCves)],
+    ['ASNs observed', fmtNum(asns.length)],
+    ['Top ASN share', topAsn ? `${escHtml(topAsn.asn)} · ${topAsnShare}` : '—', topAsn?.name || null, true],
+    ['GET share', getShare],
+    ['Countries (ASN)', fmtNum(countries.length)],
+  ];
+
+  el.innerHTML = cards.map(([label, value, title, small]) => `
+    <div class="summary-card"${title ? ` title="${escHtml(title)}"` : ''}>
+      <span class="summary-value${small ? ' sm' : ''}">${value}</span>
       <span class="summary-label">${escHtml(label)}</span>
     </div>`).join('');
 }
@@ -146,22 +236,20 @@ function renderMeta(stats) {
   const ts = stats.generated_at
     ? new Date(stats.generated_at).toUTCString()
     : 'unknown';
-  const honeypots = (stats.honeypots || []).map(h =>
+  const honeypots = (stats.honeypots || []).map((h) =>
     `<span class="badge badge-source">${escHtml(h)}</span>`).join(' ');
   el.innerHTML = `Stats generated: ${escHtml(ts)} &nbsp;|&nbsp; Honeypots: ${honeypots || '—'} &nbsp;|&nbsp;
     Source: <a href="https://github.com/seckid/logs/blob/main/stats/stats.json" target="_blank" rel="noopener">seckid/logs/stats/stats.json</a>`;
 }
 
 function renderTrafficChart(eventsPerDay, honeypots) {
-  const filtered = eventsPerDay;
-  const days = Object.keys(filtered).sort();
+  const days = Object.keys(eventsPerDay || {}).sort();
   if (!days.length) return;
 
-  const sources = (honeypots || []).filter(s => s !== 'total');
-
-  const datasets = sources.map(src => ({
+  const sources = (honeypots || []).filter((s) => s !== 'total');
+  const datasets = sources.map((src) => ({
     label: src,
-    data: days.map(d => (filtered[d] || {})[src] || 0),
+    data: days.map((d) => (eventsPerDay[d] || {})[src] || 0),
     borderColor: sourceColour(src),
     backgroundColor: sourceColour(src) + '22',
     borderWidth: 2,
@@ -171,6 +259,26 @@ function renderTrafficChart(eventsPerDay, honeypots) {
     fill: false,
   }));
 
+  datasets.push({
+    label: 'Total',
+    data: days.map((d) => {
+      const row = eventsPerDay[d] || {};
+      if (row.total != null) return Number(row.total) || 0;
+      return Object.entries(row)
+        .filter(([k]) => k !== 'total')
+        .reduce((s, [, v]) => s + (Number(v) || 0), 0);
+    }),
+    borderColor: '#e2e8f0',
+    backgroundColor: 'transparent',
+    borderWidth: 2.5,
+    borderDash: [6, 4],
+    pointRadius: 0,
+    pointHoverRadius: 4,
+    tension: 0.25,
+    fill: false,
+    order: 0,
+  });
+
   makeChart('chart-traffic', {
     type: 'line',
     data: { labels: days, datasets },
@@ -179,10 +287,12 @@ function renderTrafficChart(eventsPerDay, honeypots) {
       maintainAspectRatio: true,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'top', labels: { color: '#9ca3af', padding: 10 } },
+        legend: { position: 'top', labels: { color: CHART_TICK, padding: 10 } },
         tooltip: {
           callbacks: {
             footer: (items) => {
+              const totalItem = items.find((i) => i.dataset.label === 'Total');
+              if (totalItem) return '';
               const total = items.reduce((s, i) => s + i.parsed.y, 0);
               return `Total: ${total.toLocaleString()}`;
             },
@@ -190,8 +300,8 @@ function renderTrafficChart(eventsPerDay, honeypots) {
         },
       },
       scales: {
-        x: { grid: { color: 'rgba(45,55,72,.4)' }, ticks: { color: '#9ca3af', maxRotation: 45 } },
-        y: { beginAtZero: true, grid: { color: 'rgba(45,55,72,.4)' }, ticks: { color: '#9ca3af' } },
+        x: { grid: { color: CHART_GRID }, ticks: { color: CHART_TICK, maxRotation: 45 } },
+        y: { beginAtZero: true, grid: { color: CHART_GRID }, ticks: { color: CHART_TICK } },
       },
     },
   });
@@ -207,14 +317,14 @@ function renderSourcesChart(totals) {
       datasets: [{
         data: entries.map(([, v]) => v),
         backgroundColor: entries.map(([k]) => sourceColour(k)),
-        borderColor: 'var(--bg-secondary,#1a1f2e)',
+        borderColor: '#141b2d',
         borderWidth: 2,
       }],
     },
     options: {
       responsive: true,
       plugins: {
-        legend: { position: 'bottom', labels: { color: '#9ca3af', padding: 8 } },
+        legend: { position: 'bottom', labels: { color: CHART_TICK, padding: 8 } },
         tooltip: { callbacks: { label: (c) => ` ${c.label}: ${c.parsed.toLocaleString()}` } },
       },
     },
@@ -239,9 +349,78 @@ function renderMethodsChart(methods) {
       indexAxis: 'y',
       responsive: true,
       plugins: { legend: { display: false } },
-      scales: {
-        x: { beginAtZero: true, grid: { color: 'rgba(45,55,72,.4)' }, ticks: { color: '#9ca3af' } },
-        y: { grid: { display: false }, ticks: { color: '#9ca3af', font: { family: 'JetBrains Mono' } } },
+      scales: axisOpts(true),
+    },
+  });
+}
+
+function renderCountriesChart(stats) {
+  const rows = countryEventCounts(stats).slice(0, 12);
+  if (!rows.length) return;
+  makeChart('chart-countries', {
+    type: 'doughnut',
+    data: {
+      labels: rows.map((r) => r.country),
+      datasets: [{
+        data: rows.map((r) => r.count),
+        backgroundColor: rows.map((_, i) => COLOURS[i % COLOURS.length]),
+        borderColor: '#141b2d',
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: CHART_TICK, padding: 8 } },
+        tooltip: { callbacks: { label: (c) => ` ${c.label}: ${c.parsed.toLocaleString()}` } },
+      },
+    },
+  });
+}
+
+function renderCvesChart(cves) {
+  const top = [...(cves || [])].sort((a, b) => b.count - a.count).slice(0, 12);
+  if (!top.length) return;
+  makeChart('chart-cves', {
+    type: 'bar',
+    data: {
+      labels: top.map((c) => c.cve),
+      datasets: [{
+        label: 'Attempts',
+        data: top.map((c) => c.count),
+        backgroundColor: top.map((c) => severityColour(c.severity) + 'cc'),
+        borderWidth: 0,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: axisOpts(true),
+    },
+  });
+}
+
+function renderSeverityChart(stats) {
+  const rows = severityCounts(stats);
+  if (!rows.length) return;
+  makeChart('chart-severity', {
+    type: 'doughnut',
+    data: {
+      labels: rows.map((r) => r.severity),
+      datasets: [{
+        data: rows.map((r) => r.count),
+        backgroundColor: rows.map((r) =>
+          SEVERITY_COLOURS[String(r.severity).toLowerCase()] || SEVERITY_COLOURS.unknown),
+        borderColor: '#141b2d',
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: CHART_TICK, padding: 8 } },
+        tooltip: { callbacks: { label: (c) => ` ${c.label}: ${c.parsed.toLocaleString()}` } },
       },
     },
   });
@@ -253,10 +432,10 @@ function renderAsnsChart(asns) {
   makeChart('chart-asns', {
     type: 'bar',
     data: {
-      labels: top.map(a => a.asn || a.name || '?'),
+      labels: top.map((a) => a.asn || a.name || '?'),
       datasets: [{
         label: 'Events',
-        data: top.map(a => a.event_count),
+        data: top.map((a) => a.event_count),
         backgroundColor: 'rgba(139,92,246,.75)',
         borderColor: 'rgb(139,92,246)',
         borderWidth: 1,
@@ -266,10 +445,113 @@ function renderAsnsChart(asns) {
       indexAxis: 'y',
       responsive: true,
       plugins: { legend: { display: false } },
-      scales: {
-        x: { beginAtZero: true, grid: { color: 'rgba(45,55,72,.4)' }, ticks: { color: '#9ca3af' } },
-        y: { grid: { display: false }, ticks: { color: '#9ca3af', font: { family: 'JetBrains Mono', size: 11 } } },
+      scales: axisOpts(true),
+    },
+  });
+}
+
+function renderPathsChart(paths) {
+  const top = (paths || []).slice(0, 12);
+  if (!top.length) return;
+  makeChart('chart-paths', {
+    type: 'bar',
+    data: {
+      labels: top.map((p) => truncateLabel(p.path, 36)),
+      datasets: [{
+        label: 'Count',
+        data: top.map((p) => p.count),
+        backgroundColor: 'rgba(6,182,212,.75)',
+        borderWidth: 0,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => {
+              const i = items[0]?.dataIndex;
+              return i != null ? (top[i].path || '') : '';
+            },
+          },
+        },
       },
+      scales: axisOpts(true),
+    },
+  });
+}
+
+function renderUserAgentsChart(uas) {
+  const top = (uas || []).slice(0, 8);
+  if (!top.length) return;
+  makeChart('chart-uas', {
+    type: 'bar',
+    data: {
+      labels: top.map((u) => truncateLabel(u.user_agent, 34)),
+      datasets: [{
+        label: 'Count',
+        data: top.map((u) => u.count),
+        backgroundColor: 'rgba(236,72,153,.7)',
+        borderWidth: 0,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => {
+              const i = items[0]?.dataIndex;
+              return i != null ? (top[i].user_agent || '') : '';
+            },
+          },
+        },
+      },
+      scales: axisOpts(true),
+    },
+  });
+}
+
+function renderCredentialsChart(stats) {
+  const usernames = stats.top_usernames;
+  let labels;
+  let data;
+  if (Array.isArray(usernames) && usernames.length) {
+    const top = usernames.slice(0, 10);
+    labels = top.map((u) => truncateLabel(u.username || '(empty)', 24));
+    data = top.map((u) => u.count);
+  } else {
+    const map = {};
+    for (const c of stats.top_credentials || []) {
+      const u = c.username || '(empty)';
+      map[u] = (map[u] || 0) + (Number(c.count) || 0);
+    }
+    const top = Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    if (!top.length) return;
+    labels = top.map(([u]) => truncateLabel(u, 24));
+    data = top.map(([, n]) => n);
+  }
+
+  makeChart('chart-creds', {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Attempts',
+        data,
+        backgroundColor: 'rgba(245,158,11,.75)',
+        borderWidth: 0,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: axisOpts(true),
     },
   });
 }
@@ -283,41 +565,46 @@ function renderTable(tableId, rows) {
 function severityColour(severity) {
   switch ((severity || '').toLowerCase()) {
     case 'critical': return '#ef4444';
-    case 'high':     return '#f97316';
-    case 'medium':   return '#f59e0b';
-    case 'low':      return '#10b981';
-    default:         return '#6b7280';
+    case 'high': return '#f97316';
+    case 'medium': return '#f59e0b';
+    case 'low': return '#10b981';
+    default: return '#6b7280';
   }
+}
+
+function chipList(items, { limit = IP_CHIP_LIMIT, chipClass = 'ip-chip' } = {}) {
+  const list = items || [];
+  if (!list.length) return '<span style="color:#6b7280">—</span>';
+  const shown = list.slice(0, limit);
+  const rest = list.length - shown.length;
+  const chips = shown.map((v) =>
+    `<code class="${chipClass}">${escHtml(v)}</code>`).join('');
+  const more = rest > 0
+    ? `<span class="chip-more" title="${escHtml(list.slice(limit).join(', '))}">+${rest} more</span>`
+    : '';
+  return `<div class="chip-row">${chips}${more}</div>`;
 }
 
 function renderCves(cves) {
   if (!cves || !cves.length) {
-    renderTable('table-cves', ['<tr><td colspan="6" style="color:#6b7280">No CVE attempts recorded.</td></tr>']);
+    renderTable('table-cves', ['<tr><td colspan="7" style="color:#6b7280">No CVE attempts recorded.</td></tr>']);
     return;
   }
-  renderTable('table-cves', cves.map(c => {
+  renderTable('table-cves', cves.map((c) => {
     const severityBadge = c.severity
       ? `<span style="color:${severityColour(c.severity)};font-weight:600;font-size:.72rem">${escHtml(c.severity)}</span>${c.cvss_score ? ` <span style="color:#9ca3af;font-size:.72rem">(${c.cvss_score})</span>` : ''}`
       : '—';
-    const paths = (c.sample_paths || []).map(p =>
-      `<code style="display:block;font-size:.72rem;word-break:break-all;color:#93c5fd">${escHtml(p)}</code>`
-    ).join('') || '<span style="color:#6b7280">—</span>';
-    const ips = (c.sample_ips || []).map(ip =>
-      `<code style="display:block;font-size:.72rem">${escHtml(ip)}</code>`
-    ).join('') || '<span style="color:#6b7280">—</span>';
     return `
     <tr>
-      <td style="white-space:nowrap">
-        <span class="badge badge-cve">${escHtml(c.cve)}</span>
-      </td>
-      <td style="font-size:.78rem;color:#d1d5db;max-width:260px">
+      <td><span class="badge badge-cve">${escHtml(c.cve)}</span></td>
+      <td class="cell-break" style="font-size:.78rem;color:#d1d5db">
         ${c.description ? escHtml(c.description) : '<span style="color:#6b7280">—</span>'}
       </td>
       <td>${severityBadge}</td>
       <td>${fmtNum(c.count)}</td>
-      <td>${(c.sources || []).map(s => `<span class="badge badge-source">${escHtml(s)}</span>`).join(' ')}</td>
-      <td>${paths}</td>
-      <td>${ips}</td>
+      <td>${(c.sources || []).map((s) => `<span class="badge badge-source">${escHtml(s)}</span>`).join(' ') || '—'}</td>
+      <td>${chipList(c.sample_paths, { limit: 5, chipClass: 'path-chip' })}</td>
+      <td>${chipList(c.sample_ips, { limit: IP_CHIP_LIMIT, chipClass: 'ip-chip' })}</td>
     </tr>`;
   }));
 }
@@ -327,9 +614,9 @@ function renderAsnsTable(asns) {
     renderTable('table-asns', ['<tr><td colspan="5" style="color:#6b7280">No ASN data yet.</td></tr>']);
     return;
   }
-  renderTable('table-asns', asns.map(a => `
+  renderTable('table-asns', asns.map((a) => `
     <tr>
-      <td><code>${escHtml(a.asn)}</code></td>
+      <td><code class="ip-chip">${escHtml(a.asn)}</code></td>
       <td>${escHtml(a.name)}</td>
       <td>${countryFlag(a.country)} ${escHtml(a.country)}</td>
       <td>${fmtNum(a.event_count)}</td>
@@ -342,9 +629,9 @@ function renderPaths(paths) {
     renderTable('table-paths', ['<tr><td colspan="3" style="color:#6b7280">No path data.</td></tr>']);
     return;
   }
-  renderTable('table-paths', paths.map(p => `
+  renderTable('table-paths', paths.map((p) => `
     <tr>
-      <td><code>${escHtml(p.path)}</code></td>
+      <td><code class="path-chip">${escHtml(p.path)}</code></td>
       <td><span class="badge badge-source">${escHtml(p.source)}</span></td>
       <td>${fmtNum(p.count)}</td>
     </tr>`));
@@ -355,9 +642,9 @@ function renderUserAgents(uas) {
     renderTable('table-uas', ['<tr><td colspan="2" style="color:#6b7280">No user agent data.</td></tr>']);
     return;
   }
-  renderTable('table-uas', uas.map(u => `
+  renderTable('table-uas', uas.map((u) => `
     <tr>
-      <td style="word-break:break-all;font-size:.8rem">${escHtml(u.user_agent)}</td>
+      <td class="ua-cell">${escHtml(u.user_agent)}</td>
       <td>${fmtNum(u.count)}</td>
     </tr>`));
 }
@@ -367,17 +654,13 @@ function renderCredentials(creds) {
     renderTable('table-creds', ['<tr><td colspan="3" style="color:#6b7280">No credentials captured.</td></tr>']);
     return;
   }
-  renderTable('table-creds', creds.map(c => `
+  renderTable('table-creds', creds.map((c) => `
     <tr>
-      <td><code>${escHtml(c.username)}</code></td>
-      <td><code>${escHtml(c.password)}</code></td>
+      <td><code class="ip-chip">${escHtml(c.username)}</code></td>
+      <td><code class="ip-chip">${escHtml(c.password)}</code></td>
       <td>${fmtNum(c.count)}</td>
     </tr>`));
 }
-
-// -------------------------------------------------------------------------
-// Main render orchestrator
-// -------------------------------------------------------------------------
 
 function renderAll(stats, days) {
   renderMeta(stats);
@@ -387,17 +670,19 @@ function renderAll(stats, days) {
   renderTrafficChart(filtered, stats.honeypots);
   renderSourcesChart(stats.totals_by_source);
   renderMethodsChart(stats.method_counts);
+  renderCountriesChart(stats);
+  renderCvesChart(stats.cve_attempts);
+  renderSeverityChart(stats);
   renderAsnsChart(stats.top_asns);
+  renderPathsChart(stats.top_paths);
+  renderUserAgentsChart(stats.top_user_agents);
+  renderCredentialsChart(stats);
   renderCves(stats.cve_attempts);
   renderAsnsTable(stats.top_asns);
   renderPaths(stats.top_paths);
   renderUserAgents(stats.top_user_agents);
   renderCredentials(stats.top_credentials);
 }
-
-// -------------------------------------------------------------------------
-// Entry point
-// -------------------------------------------------------------------------
 
 let _cachedStats = null;
 
@@ -415,7 +700,6 @@ async function runStats() {
       throw new Error('Chart.js failed to load — check your connection or ad-blocker.');
     }
 
-    // Only re-fetch if not cached (date-range changes just re-render from cache)
     if (!_cachedStats || (loadBtn && !loadBtn._fromCache)) {
       _cachedStats = await fetchStats();
     }
@@ -433,7 +717,6 @@ async function runStats() {
 
     show('stats-content', true);
     requestAnimationFrame(() => requestAnimationFrame(() => renderAll(_cachedStats, days)));
-
   } catch (err) {
     show('stats-loading', false);
     if (loadBtn) { loadBtn.disabled = false; }
@@ -447,11 +730,10 @@ async function runStats() {
 
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('load-stats')?.addEventListener('click', () => {
-    _cachedStats = null; // force re-fetch on manual refresh
+    _cachedStats = null;
     runStats();
   });
 
-  // Re-render with new date range without re-fetching
   document.getElementById('date-range')?.addEventListener('change', () => {
     if (_cachedStats) {
       const btn = document.getElementById('load-stats');

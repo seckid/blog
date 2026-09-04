@@ -13,48 +13,222 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         /* ---- stats-specific overrides ---- */
-        .stats-controls { display:flex; flex-wrap:wrap; gap:.75rem; align-items:center; margin-bottom:1.5rem; }
-        .stats-controls label { color:var(--text-secondary,#9ca3af); font-size:.875rem; }
-        .stats-controls select { background:var(--bg-secondary,#1a1f2e); color:var(--text-primary,#e2e8f0);
-            border:1px solid var(--border,#2d3748); border-radius:.375rem; padding:.4rem .75rem; font-size:.875rem; }
-        .btn-primary { background:#3b82f6; color:#fff; border:none; border-radius:.375rem;
-            padding:.45rem 1.1rem; font-size:.875rem; cursor:pointer; font-weight:500; }
-        .btn-primary:hover { background:#2563eb; }
-        .btn-primary:disabled { opacity:.5; cursor:not-allowed; }
-        .hidden { display:none !important; }
-        .stats-loading, .stats-error { padding:1rem; border-radius:.5rem; margin:1rem 0; }
-        .stats-loading { background:var(--bg-secondary,#1a1f2e); color:var(--text-secondary,#9ca3af); }
-        .stats-error { background:#1f1315; border:1px solid #7f1d1d; color:#fca5a5; }
-        .stats-error a { color:#f87171; }
+        .stats-section .container {
+            max-width: 1520px;
+        }
 
-        .summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:1rem; margin-bottom:2rem; }
-        .summary-card { background:var(--bg-secondary,#1a1f2e); border:1px solid var(--border,#2d3748);
-            border-radius:.5rem; padding:1rem 1.25rem; text-align:center; }
-        .summary-value { display:block; font-size:1.75rem; font-weight:700; color:#3b82f6; line-height:1.1; }
-        .summary-label { display:block; font-size:.78rem; color:var(--text-secondary,#9ca3af); margin-top:.25rem; }
+        .stats-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            align-items: center;
+            margin-bottom: 1.25rem;
+        }
+        .stats-controls label { color: var(--text-secondary, #9ca3af); font-size: 0.875rem; }
+        .stats-controls select {
+            background: var(--bg-secondary, #1a1f2e);
+            color: var(--text-primary, #e2e8f0);
+            border: 1px solid var(--border-color, #2d3748);
+            border-radius: 0.375rem;
+            padding: 0.4rem 0.75rem;
+            font-size: 0.875rem;
+        }
+        .btn-primary {
+            background: #3b82f6;
+            color: #fff;
+            border: none;
+            border-radius: 0.375rem;
+            padding: 0.45rem 1.1rem;
+            font-size: 0.875rem;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .btn-primary:hover { background: #2563eb; }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+        .hidden { display: none !important; }
+        .stats-loading, .stats-error { padding: 1rem; border-radius: 0.5rem; margin: 1rem 0; }
+        .stats-loading { background: var(--bg-secondary, #1a1f2e); color: var(--text-secondary, #9ca3af); }
+        .stats-error { background: #1f1315; border: 1px solid #7f1d1d; color: #fca5a5; }
+        .stats-error a { color: #f87171; }
 
-        .section-title { font-size:1.1rem; font-weight:600; color:var(--text-primary,#e2e8f0);
-            margin:2rem 0 .75rem; border-left:3px solid #3b82f6; padding-left:.6rem; }
-        .chart-container { background:var(--bg-secondary,#1a1f2e); border:1px solid var(--border,#2d3748);
-            border-radius:.5rem; padding:1rem; margin-bottom:1.5rem; }
-        .chart-container canvas { max-height:320px; }
-        .chart-half canvas { max-height:260px; }
-        .two-col { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1.5rem; }
-        @media(max-width:700px){ .two-col { grid-template-columns:1fr; } }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 1.75rem;
+        }
+        .summary-card {
+            background: var(--bg-secondary, #1a1f2e);
+            border: 1px solid var(--border-color, #2d3748);
+            border-radius: 0.55rem;
+            padding: 0.85rem 1rem;
+            text-align: center;
+        }
+        .summary-value {
+            display: block;
+            font-size: 1.45rem;
+            font-weight: 700;
+            color: #3b82f6;
+            line-height: 1.15;
+            font-variant-numeric: tabular-nums;
+        }
+        .summary-value.sm { font-size: 1.05rem; }
+        .summary-label {
+            display: block;
+            font-size: 0.72rem;
+            color: var(--text-secondary, #9ca3af);
+            margin-top: 0.3rem;
+            line-height: 1.3;
+        }
 
-        .stats-table { width:100%; border-collapse:collapse; font-size:.82rem; }
-        .stats-table th { text-align:left; color:var(--text-secondary,#9ca3af); font-weight:500;
-            border-bottom:1px solid var(--border,#2d3748); padding:.4rem .6rem; }
-        .stats-table td { padding:.35rem .6rem; border-bottom:1px solid rgba(45,55,72,.4); color:var(--text-primary,#e2e8f0); word-break:break-all; }
-        .stats-table tr:last-child td { border-bottom:none; }
-        .table-wrapper { background:var(--bg-secondary,#1a1f2e); border:1px solid var(--border,#2d3748);
-            border-radius:.5rem; padding:.5rem 0; overflow-x:auto; max-height:360px; overflow-y:auto; }
-        .badge { display:inline-block; background:#1e3a5f; color:#93c5fd; border-radius:.25rem;
-            padding:.1rem .45rem; font-size:.72rem; font-family:'JetBrains Mono',monospace; margin:.1rem .1rem 0 0; }
-        .badge-cve { background:#1f2937; color:#f9a8d4; }
-        .badge-source { background:#14291a; color:#6ee7b7; }
-        .meta-line { font-size:.78rem; color:var(--text-secondary,#9ca3af); margin-bottom:1.5rem; }
-        .meta-line a { color:#60a5fa; }
+        .section-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: var(--text-primary, #e2e8f0);
+            margin: 1.75rem 0 0.35rem;
+            border-left: 3px solid #3b82f6;
+            padding-left: 0.6rem;
+        }
+        .section-sub {
+            font-size: 0.78rem;
+            color: var(--text-secondary, #9ca3af);
+            margin: 0 0 0.65rem;
+            padding-left: 0.75rem;
+        }
+
+        .chart-container {
+            background: var(--bg-secondary, #1a1f2e);
+            border: 1px solid var(--border-color, #2d3748);
+            border-radius: 0.55rem;
+            padding: 1rem;
+            margin-bottom: 0;
+            min-height: 0;
+        }
+        .chart-container canvas { max-height: 340px; }
+        .chart-half canvas { max-height: 280px; }
+        .chart-tall canvas { max-height: 320px; }
+
+        .two-col, .three-col {
+            display: grid;
+            gap: 1rem;
+            margin-bottom: 1.25rem;
+        }
+        .two-col { grid-template-columns: 1fr 1fr; }
+        .three-col { grid-template-columns: 1fr 1fr 1fr; }
+        @media (max-width: 1100px) {
+            .three-col { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 700px) {
+            .two-col, .three-col { grid-template-columns: 1fr; }
+        }
+
+        .stats-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 0.82rem;
+        }
+        .stats-table th {
+            text-align: left;
+            color: var(--text-secondary, #9ca3af);
+            font-weight: 500;
+            border-bottom: 1px solid var(--border-color, #2d3748);
+            padding: 0.5rem 0.65rem;
+            position: sticky;
+            top: 0;
+            background: var(--bg-secondary, #1a1f2e);
+            z-index: 1;
+        }
+        .stats-table td {
+            padding: 0.45rem 0.65rem;
+            border-bottom: 1px solid rgba(45, 55, 72, 0.4);
+            color: var(--text-primary, #e2e8f0);
+            vertical-align: top;
+            word-break: normal;
+            overflow-wrap: anywhere;
+        }
+        .stats-table tbody tr:hover td {
+            background: rgba(59, 130, 246, 0.06);
+        }
+        .stats-table tbody tr:nth-child(even) td {
+            background: rgba(255, 255, 255, 0.015);
+        }
+        .stats-table tbody tr:nth-child(even):hover td {
+            background: rgba(59, 130, 246, 0.08);
+        }
+        .stats-table tr:last-child td { border-bottom: none; }
+
+        #table-cves th:nth-child(1),
+        #table-cves td:nth-child(1) { white-space: nowrap; width: 8.5rem; }
+        #table-cves th:nth-child(3),
+        #table-cves td:nth-child(3) { white-space: nowrap; width: 5.5rem; }
+        #table-cves th:nth-child(4),
+        #table-cves td:nth-child(4) { white-space: nowrap; width: 4.5rem; text-align: right; }
+        #table-cves th:nth-child(2),
+        #table-cves td:nth-child(2) { min-width: 200px; max-width: 320px; }
+        #table-cves th:nth-child(6),
+        #table-cves td:nth-child(6) { min-width: 200px; }
+        #table-cves th:nth-child(7),
+        #table-cves td:nth-child(7) { min-width: 150px; }
+
+        .table-wrapper {
+            background: var(--bg-secondary, #1a1f2e);
+            border: 1px solid var(--border-color, #2d3748);
+            border-radius: 0.55rem;
+            padding: 0;
+            overflow-x: auto;
+            max-height: 420px;
+            overflow-y: auto;
+            margin-bottom: 1.25rem;
+        }
+
+        .chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.3rem;
+            align-items: center;
+        }
+        .ip-chip, .path-chip {
+            display: inline-block;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem;
+            white-space: nowrap;
+            background: #121826;
+            border: 1px solid #2d3748;
+            border-radius: 0.3rem;
+            padding: 0.12rem 0.4rem;
+            color: #93c5fd;
+            line-height: 1.4;
+        }
+        .path-chip {
+            white-space: normal;
+            word-break: break-all;
+            max-width: 100%;
+        }
+        .chip-more {
+            font-size: 0.7rem;
+            color: var(--text-secondary, #9ca3af);
+            white-space: nowrap;
+        }
+        .cell-break { word-break: break-word; overflow-wrap: anywhere; }
+        .ua-cell { word-break: break-all; font-size: 0.8rem; }
+
+        .badge {
+            display: inline-block;
+            background: #1e3a5f;
+            color: #93c5fd;
+            border-radius: 0.25rem;
+            padding: 0.1rem 0.45rem;
+            font-size: 0.72rem;
+            font-family: 'JetBrains Mono', monospace;
+            margin: 0.1rem 0.1rem 0 0;
+        }
+        .badge-cve { background: #1f2937; color: #f9a8d4; }
+        .badge-source { background: #14291a; color: #6ee7b7; }
+        .meta-line { font-size: 0.78rem; color: var(--text-secondary, #9ca3af); margin-bottom: 1.25rem; }
+        .meta-line a { color: #60a5fa; }
+
+        .hero-stats .hero-subtitle { max-width: 44rem; margin-left: auto; margin-right: auto; }
     </style>
 </head>
 <body>
@@ -79,14 +253,13 @@
         <section class="hero hero-stats">
             <div class="hero-content">
                 <h1 class="hero-title">Honeypot Statistics</h1>
-                <p class="hero-subtitle">Live threat intelligence from FortiPot, CentreStack, RDP and SSH honeypots — updated hourly</p>
+                <p class="hero-subtitle">Live probe telemetry from FortiPot, BIG-IP, CentreStack, SharePoint, Ivanti, Front, and related sensors — updated hourly</p>
             </div>
         </section>
 
         <section class="stats-section">
             <div class="container">
 
-                <!-- Controls -->
                 <div class="stats-controls">
                     <label for="date-range">Traffic chart — show last</label>
                     <select id="date-range">
@@ -106,50 +279,83 @@
 
                 <div id="stats-content" class="hidden">
 
-                    <!-- Meta line -->
                     <p class="meta-line" id="meta-line"></p>
 
-                    <!-- Summary cards -->
                     <div class="summary-grid" id="summary-grid"></div>
 
-                    <!-- Traffic over time -->
                     <h2 class="section-title">Traffic over time</h2>
-                    <div class="chart-container">
+                    <p class="section-sub">Per-honeypot daily volume with a dashed total overlay.</p>
+                    <div class="chart-container chart-tall" style="margin-bottom:1.25rem">
                         <canvas id="chart-traffic"></canvas>
                     </div>
 
-                    <!-- Honeypot breakdown + Methods -->
-                    <div class="two-col">
+                    <div class="three-col">
                         <div>
                             <h2 class="section-title">Events by honeypot</h2>
+                            <p class="section-sub">All-time share of captured events.</p>
                             <div class="chart-container chart-half">
                                 <canvas id="chart-sources"></canvas>
                             </div>
                         </div>
                         <div>
                             <h2 class="section-title">HTTP methods</h2>
+                            <p class="section-sub">Request verbs observed across sensors.</p>
                             <div class="chart-container chart-half">
                                 <canvas id="chart-methods"></canvas>
                             </div>
                         </div>
+                        <div>
+                            <h2 class="section-title">Events by country</h2>
+                            <p class="section-sub">ASN country rollup (approximate geo).</p>
+                            <div class="chart-container chart-half">
+                                <canvas id="chart-countries"></canvas>
+                            </div>
+                        </div>
                     </div>
 
-                    <!-- CVE attempts -->
+                    <div class="two-col">
+                        <div>
+                            <h2 class="section-title">CVE attempts</h2>
+                            <p class="section-sub">Detected exploitation probes by CVE ID.</p>
+                            <div class="chart-container chart-half">
+                                <canvas id="chart-cves"></canvas>
+                            </div>
+                        </div>
+                        <div>
+                            <h2 class="section-title">CVE severity mix</h2>
+                            <p class="section-sub">Weighted by attempt count.</p>
+                            <div class="chart-container chart-half">
+                                <canvas id="chart-severity"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
                     <h2 class="section-title">CVE exploitation attempts</h2>
+                    <p class="section-sub">Sample paths and source IPs from matched probes.</p>
                     <div class="table-wrapper">
                         <table class="stats-table" id="table-cves">
-                            <thead><tr><th>CVE</th><th>Description</th><th>Severity</th><th>Count</th><th>Honeypots</th><th>Requests observed</th><th>Source IPs</th></tr></thead>
+                            <thead>
+                                <tr>
+                                    <th>CVE</th>
+                                    <th>Description</th>
+                                    <th>Severity</th>
+                                    <th>Count</th>
+                                    <th>Honeypots</th>
+                                    <th>Requests observed</th>
+                                    <th>Source IPs</th>
+                                </tr>
+                            </thead>
                             <tbody></tbody>
                         </table>
                     </div>
 
-                    <!-- Top ASNs -->
                     <h2 class="section-title">Top ASNs observed</h2>
+                    <p class="section-sub">Networks generating the most probe volume.</p>
                     <div class="two-col">
                         <div class="chart-container chart-half">
                             <canvas id="chart-asns"></canvas>
                         </div>
-                        <div class="table-wrapper">
+                        <div class="table-wrapper" style="margin-bottom:0;max-height:320px">
                             <table class="stats-table" id="table-asns">
                                 <thead><tr><th>ASN</th><th>Organisation</th><th>Country</th><th>Events</th><th>IPs</th></tr></thead>
                                 <tbody></tbody>
@@ -157,32 +363,47 @@
                         </div>
                     </div>
 
-                    <!-- Top paths -->
-                    <h2 class="section-title">Top requested paths</h2>
-                    <div class="table-wrapper">
-                        <table class="stats-table" id="table-paths">
-                            <thead><tr><th>Path</th><th>Honeypot</th><th>Count</th></tr></thead>
-                            <tbody></tbody>
-                        </table>
+                    <div class="two-col" style="margin-top:1.25rem">
+                        <div>
+                            <h2 class="section-title">Top requested paths</h2>
+                            <p class="section-sub">Most common URI targets.</p>
+                            <div class="chart-container chart-half" style="margin-bottom:0.75rem">
+                                <canvas id="chart-paths"></canvas>
+                            </div>
+                            <div class="table-wrapper" style="max-height:240px">
+                                <table class="stats-table" id="table-paths">
+                                    <thead><tr><th>Path</th><th>Honeypot</th><th>Count</th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div>
+                            <h2 class="section-title">Top user agents</h2>
+                            <p class="section-sub">Client strings seen most often.</p>
+                            <div class="chart-container chart-half" style="margin-bottom:0.75rem">
+                                <canvas id="chart-uas"></canvas>
+                            </div>
+                            <div class="table-wrapper" style="max-height:240px">
+                                <table class="stats-table" id="table-uas">
+                                    <thead><tr><th>User agent</th><th>Count</th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
 
-                    <!-- Top user agents -->
-                    <h2 class="section-title">Top 5 user agents</h2>
-                    <div class="table-wrapper">
-                        <table class="stats-table" id="table-uas">
-                            <thead><tr><th>User agent</th><th>Count</th></tr></thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-
-                    <!-- Credentials -->
                     <h2 class="section-title">Login credentials captured</h2>
-                    <p class="meta-line">Top 50 username / password combinations (all-time).</p>
-                    <div class="table-wrapper">
-                        <table class="stats-table" id="table-creds">
-                            <thead><tr><th>Username</th><th>Password</th><th>Count</th></tr></thead>
-                            <tbody></tbody>
-                        </table>
+                    <p class="section-sub">Top username / password combinations and username frequency.</p>
+                    <div class="two-col">
+                        <div class="chart-container chart-half">
+                            <canvas id="chart-creds"></canvas>
+                        </div>
+                        <div class="table-wrapper" style="margin-bottom:0;max-height:320px">
+                            <table class="stats-table" id="table-creds">
+                                <thead><tr><th>Username</th><th>Password</th><th>Count</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
                     </div>
 
                 </div><!-- /stats-content -->
