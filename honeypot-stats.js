@@ -21,6 +21,8 @@ const SOURCE_COLOURS = {
   bigippot: '#06b6d4',
   front: '#10b981',
   rdppot: '#14b8a6',
+  sshppot: '#a855f7',
+  sshpot: '#a855f7',
   unknown: '#6b7280',
 };
 
