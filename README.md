@@ -37,24 +37,15 @@ Modify the navigation links in `index.html` and `post.html` as needed.
 
 ### 3. Configure Medium Integration
 
-The blog automatically fetches posts from your Medium profile. To change the Medium profile:
+The homepage reads `posts.json`, which is built from your Medium RSS feed. Browsers cannot call Medium directly, and the previous rss2json proxy now refuses the request.
 
-Edit `script.js` and update the Medium profile URL:
+Refresh the list from this folder:
 
-```javascript
-const MEDIUM_PROFILE = 'https://medium.com/@seckid';
-const MEDIUM_RSS_FEED = 'https://medium.com/feed/@seckid';
+```bash
+python scripts/fetch_posts.py
 ```
 
-Replace `@seckid` with your Medium username.
-
-**How it works:**
-- The blog fetches your Medium RSS feed automatically
-- Posts are displayed on the homepage with excerpts
-- Clicking a post redirects to the full article on Medium
-- No need to manually add posts - just publish on Medium!
-
-**Note:** The blog uses the RSS2JSON API (free tier) to convert Medium's RSS feed to JSON. If you prefer a different service or want to self-host, you can modify the `fetchMediumPosts()` function in `script.js`.
+A GitHub Action (`.github/workflows/refresh-posts.yml`) runs that command every day and can also be started by hand. After it commits `posts.json`, GitHub Pages serves the new list.
 
 ### 4. Deploy to GitHub Pages
 

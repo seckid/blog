@@ -1,0 +1,41 @@
+[
+  {
+    "id": "https://medium.com/p/ff9839ac4d7a",
+    "title": "From Scan to Miner: Tracing RedTail’s CVE-2024–4577 Chain on a Honeypot Network",
+    "date": "2026-08-31",
+    "category": "Article",
+    "tags": [],
+    "excerpt": "Subtitle: Automated PHP-CGI spray does not stop at the exploit — it chains straight into cryptominer deployment. We followed each stage from honeypot logs to the second-stage dropper. TL;DR CVE-2024–4...",
+    "link": "https://medium.com/@seckid/from-scan-to-miner-tracing-redtails-cve-2024-4577-chain-on-a-honeypot-network-ff9839ac4d7a?source=rss-69114223a2b8------2",
+    "author": "Seckid",
+    "thumbnail": "https://cdn-images-1.medium.com/max/1024/1*M0qvbIYOKj-VrBv-vkwE9g.jpeg?w=800"
+  },
+  {
+    "id": "https://medium.com/p/f8ba20ea6308",
+    "title": "Using Teraform & Ancible to build out home lab infrastructure on ESXI",
+    "date": "2025-12-05",
+    "category": "soc-home-lab",
+    "tags": [
+      "soc-home-lab"
+    ],
+    "excerpt": "I think it is best to start off this post by pointing out, this will be my first attempt to build my home lab with Ancible and Terraform. I'm a cyber security enthusiast and from time to time, i try t...",
+    "link": "https://medium.com/@seckid/using-teraform-ancible-to-build-out-home-lab-infrastructure-on-esxi-f8ba20ea6308?source=rss-69114223a2b8------2",
+    "author": "Seckid",
+    "thumbnail": "https://cdn-images-1.medium.com/max/1024/1*0DM3RvfL-69ZiOplk-OzSQ.jpeg?w=800"
+  },
+  {
+    "id": "https://medium.com/p/ca9d560d2b40",
+    "title": "Collecting the Fortinet Honey",
+    "date": "2024-04-01",
+    "category": "honeypot",
+    "tags": [
+      "honeypot",
+      "python",
+      "cybersecurity"
+    ],
+    "excerpt": "Gen-AI image created from “Computer Honeypot” Introduction Since Covid-19, many organizations have adopted a more relaxed working from home policy, where employees connect to an organization via VPN n...",
+    "link": "https://medium.com/@seckid/collecting-the-fortinet-honey-ca9d560d2b40?source=rss-69114223a2b8------2",
+    "author": "Seckid",
+    "thumbnail": "https://cdn-images-1.medium.com/max/1024/1*0QNeeWV-OVsxR6mQEnBt9w.jpeg?w=800"
+  }
+]
